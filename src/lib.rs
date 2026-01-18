@@ -58,14 +58,28 @@ enum TftpErrorCode {
 }
 
 // RFC 1350 - Transfer modes
+///
+/// NIST Controls:
+/// - SI-10: Information Input Validation (mode validation)
+/// - CM-6: Configuration Settings (transfer mode selection)
 #[derive(Debug, Clone, PartialEq, Eq)]
 enum TransferMode {
-    Netascii, // ASCII mode (line ending conversion)
-    Octet,    // Binary mode (no conversion)
-    Mail,     // Mail mode (obsolete)
+    /// NETASCII mode - 8-bit ASCII with network line ending conversion (CR+LF)
+    /// RFC 1350: Convert local line endings to/from CR+LF format
+    Netascii,
+    /// OCTET mode - Binary transfer without conversion
+    /// RFC 1350: Transfer data as-is without modification
+    Octet,
+    /// MAIL mode - Obsolete, not implemented
+    /// RFC 1350: Originally for mail delivery, deprecated
+    Mail,
 }
 
 impl TransferMode {
+    /// Parse transfer mode from string
+    ///
+    /// NIST Controls:
+    /// - SI-10: Information Input Validation (validate mode string)
     fn from_str(s: &str) -> std::result::Result<Self, SnowOwlError> {
         match s.to_lowercase().as_str() {
             "netascii" => Ok(TransferMode::Netascii),
@@ -73,6 +87,58 @@ impl TransferMode {
             "mail" => Ok(TransferMode::Mail),
             _ => Err(SnowOwlError::Tftp(format!("Invalid transfer mode: {}", s))),
         }
+    }
+
+    /// Convert data to NETASCII format (Unix LF -> CR+LF)
+    ///
+    /// RFC 1350 NETASCII Specification:
+    /// - Lines are terminated with CR+LF (0x0D 0x0A)
+    /// - Converts Unix line endings (LF) to network standard (CR+LF)
+    /// - Handles CR, LF, and existing CR+LF sequences correctly
+    ///
+    /// NIST Controls:
+    /// - SI-10: Information Input Validation (data format conversion)
+    /// - SC-4: Information in Shared Resources (standardized encoding)
+    fn convert_to_netascii(data: &[u8]) -> Vec<u8> {
+        let mut result = Vec::with_capacity(data.len() + data.len() / 80); // Estimate extra space for CR
+        let mut i = 0;
+
+        while i < data.len() {
+            let byte = data[i];
+
+            match byte {
+                b'\n' => {
+                    // LF (0x0A) - check if preceded by CR
+                    if i > 0 && data[i - 1] == b'\r' {
+                        // Already CR+LF, just add LF
+                        result.push(b'\n');
+                    } else {
+                        // Bare LF - convert to CR+LF
+                        result.push(b'\r');
+                        result.push(b'\n');
+                    }
+                }
+                b'\r' => {
+                    // CR (0x0D) - check if followed by LF
+                    if i + 1 < data.len() && data[i + 1] == b'\n' {
+                        // CR+LF sequence - add CR, LF will be handled in next iteration
+                        result.push(b'\r');
+                    } else {
+                        // Bare CR - convert to CR+LF
+                        result.push(b'\r');
+                        result.push(b'\n');
+                    }
+                }
+                _ => {
+                    // Regular character - copy as-is
+                    result.push(byte);
+                }
+            }
+
+            i += 1;
+        }
+
+        result
     }
 }
 
@@ -155,6 +221,14 @@ impl TftpServer {
 
                 // Validate transfer mode
                 let mode = TransferMode::from_str(&mode_str)?;
+
+                // RFC 1350: Reject obsolete MAIL mode
+                // NIST CM-7: Least Functionality - disable unsupported features
+                if mode == TransferMode::Mail {
+                    warn!("MAIL mode requested from {}: obsolete and not supported", client_addr);
+                    Self::send_error(client_addr, TftpErrorCode::IllegalOperation, "MAIL mode not supported").await?;
+                    return Ok(());
+                }
 
                 // Parse options (RFC 2347)
                 let mut options = TftpOptions::default();
@@ -241,10 +315,16 @@ impl TftpServer {
         Ok(())
     }
 
+    /// Handle RRQ (Read Request) with support for NETASCII and OCTET modes
+    ///
+    /// NIST Controls:
+    /// - AC-3: Access Enforcement (file access validation)
+    /// - SI-10: Information Input Validation (transfer mode handling)
+    /// - SC-4: Information in Shared Resources (data format conversion)
     async fn handle_read_request(
         file_path: PathBuf,
         client_addr: SocketAddr,
-        _mode: TransferMode,
+        mode: TransferMode,
         options: TftpOptions,
         mut negotiated_options: HashMap<String, String>,
     ) -> Result<()> {
@@ -264,7 +344,9 @@ impl TftpServer {
         let file_metadata = file.metadata().await?;
         let file_size = file_metadata.len();
 
-        // Update tsize option with actual file size
+        // RFC 2349: Update tsize option with actual file size
+        // Note: For NETASCII mode, the transferred size may differ from file_size
+        // due to line ending conversion, but we report the on-disk size per RFC behavior
         if negotiated_options.contains_key("tsize") {
             negotiated_options.insert("tsize".to_string(), file_size.to_string());
         }
@@ -290,21 +372,39 @@ impl TftpServer {
         }
 
         // Transfer file blocks
-        let mut buffer = vec![0u8; block_size];
-        let mut block_num: u16 = 1;
+        // For NETASCII mode, we need to handle the entire file to apply line ending conversion
+        // For OCTET mode, we can stream blocks directly
+        let file_data = if mode == TransferMode::Netascii {
+            // RFC 1350: NETASCII mode - convert line endings
+            // NIST SI-10: Apply data format conversion for text transfer
+            let mut raw_data = Vec::new();
+            file.read_to_end(&mut raw_data).await?;
+            TransferMode::convert_to_netascii(&raw_data)
+        } else {
+            // OCTET mode - read entire file for simplicity
+            // (could be optimized for streaming in future)
+            let mut raw_data = Vec::new();
+            file.read_to_end(&mut raw_data).await?;
+            raw_data
+        };
 
-        loop {
-            // Read a block from the file
-            let bytes_read = file.read(&mut buffer).await?;
+        // Send file data in blocks
+        let mut block_num: u16 = 1;
+        let mut offset = 0;
+
+        while offset < file_data.len() {
+            // Calculate block size for this packet
+            let bytes_to_send = std::cmp::min(block_size, file_data.len() - offset);
+            let block_data = &file_data[offset..offset + bytes_to_send];
 
             // RFC 1350: DATA packet format
             // 2 bytes: opcode (03)
             // 2 bytes: block number
             // n bytes: data (0-blocksize bytes)
-            let mut data_packet = BytesMut::with_capacity(4 + bytes_read);
+            let mut data_packet = BytesMut::with_capacity(4 + bytes_to_send);
             data_packet.put_u16(TftpOpcode::Data as u16);
             data_packet.put_u16(block_num);
-            data_packet.put_slice(&buffer[..bytes_read]);
+            data_packet.put_slice(block_data);
 
             // Send with retries
             if let Err(e) = Self::send_with_retry(&socket, &data_packet, timeout).await {
@@ -321,14 +421,34 @@ impl TftpServer {
                 }
             }
 
+            offset += bytes_to_send;
+
             // RFC 1350: Transfer complete when data packet < block_size
-            if bytes_read < block_size {
-                debug!("Transfer complete: {} blocks sent ({} bytes)", block_num, file_size);
+            if bytes_to_send < block_size {
+                debug!(
+                    "Transfer complete: {} blocks sent ({} bytes, mode: {:?})",
+                    block_num,
+                    file_data.len(),
+                    mode
+                );
                 break;
             }
 
             // RFC 1350: Block numbers wrap around after 65535
             block_num = block_num.wrapping_add(1);
+        }
+
+        // Handle empty file case
+        if file_data.is_empty() {
+            // Send a single empty data block
+            let mut data_packet = BytesMut::with_capacity(4);
+            data_packet.put_u16(TftpOpcode::Data as u16);
+            data_packet.put_u16(1);
+
+            Self::send_with_retry(&socket, &data_packet, timeout).await?;
+            Self::wait_for_ack(&socket, 1, timeout).await?;
+
+            debug!("Transfer complete: empty file (mode: {:?})", mode);
         }
 
         Ok(())
