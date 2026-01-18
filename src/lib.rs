@@ -12,6 +12,7 @@ use tracing::{debug, error, info, warn};
 const TFTP_PORT: u16 = 69;
 const DEFAULT_BLOCK_SIZE: usize = 512; // RFC 1350 standard block size
 const MAX_BLOCK_SIZE: usize = 65464; // RFC 2348 maximum block size
+const MAX_PACKET_SIZE: usize = 65468; // Max block size + 4 byte header
 const DEFAULT_TIMEOUT_SECS: u64 = 5;
 const MAX_RETRIES: u32 = 5;
 
@@ -28,7 +29,7 @@ enum TftpOpcode {
 impl TryFrom<u16> for TftpOpcode {
     type Error = SnowOwlError;
 
-    fn try_from(value: u16) -> std::result::Result<Self, Self::Error> {
+    fn try_from(value: u16) -> std::result::Result<Self, <Self as TryFrom<u16>>::Error> {
         match value {
             1 => Ok(TftpOpcode::Rrq),
             2 => Ok(TftpOpcode::Wrq),
