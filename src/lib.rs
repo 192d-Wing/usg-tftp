@@ -439,16 +439,26 @@ impl TftpServer {
             .map_err(|e| SnowOwlError::Tftp(format!("Invalid UTF-8: {}", e)))
     }
 
+    /// Validate and resolve file paths to prevent directory traversal attacks
+    ///
+    /// NIST Controls:
+    /// - AC-3: Access Enforcement (restrict access to authorized paths)
+    /// - SI-10: Information Input Validation (validate filename format)
+    /// - SC-7(12): Host-Based Boundary Protection (filesystem boundary enforcement)
+    /// - CM-7: Least Functionality (read-only access, no writes)
     fn validate_and_resolve_path(root_dir: &Path, filename: &str) -> Result<PathBuf> {
-        // Normalize the filename and check for directory traversal
+        // NIST SI-10: Normalize the filename and check for directory traversal
+        // Prevent path traversal attacks (.., ./, etc.)
         let filename = filename.replace('\\', "/");
         if filename.contains("..") {
             return Err(SnowOwlError::Tftp("Invalid filename".to_string()));
         }
 
+        // NIST AC-3: Join with root directory to enforce base path
         let file_path = root_dir.join(filename.trim_start_matches('/'));
 
-        // Ensure the resolved path is within root_dir
+        // NIST AC-3: Ensure the resolved path is within root_dir
+        // NIST SC-7(12): Enforce filesystem boundary protection
         let canonical_root = root_dir.canonicalize().unwrap_or_else(|_| root_dir.to_path_buf());
         if let Ok(canonical_file) = file_path.canonicalize() {
             if !canonical_file.starts_with(&canonical_root) {
