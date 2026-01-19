@@ -133,11 +133,17 @@ fn batch_recv_packets(
     socket: &UdpSocket,
     buffers: &mut [Vec<u8>],
     max_packets: usize,
+    timeout_us: u64,
 ) -> Result<Vec<(usize, SocketAddr)>> {
     use std::io::IoSliceMut;
+    use nix::sys::time::TimeSpec;
+    use std::time::Duration;
 
     let socket_fd = socket.as_raw_fd();
     let batch_size = std::cmp::min(max_packets, buffers.len());
+
+    debug!("batch_recv_packets called: fd={}, batch_size={}, timeout={}μs",
+           socket_fd, batch_size, timeout_us);
 
     // Prepare RecvMmsgData structures
     let mut iovecs: Vec<Vec<IoSliceMut>> = buffers[..batch_size]
@@ -147,13 +153,21 @@ fn batch_recv_packets(
 
     let mut headers = MultiHeaders::<SockaddrStorage>::preallocate(batch_size, None);
 
+    // Use timeout instead of MSG_DONTWAIT to allow packets to accumulate
+    let timeout = if timeout_us > 0 {
+        Some(TimeSpec::from_duration(Duration::from_micros(timeout_us)))
+    } else {
+        None
+    };
+
+    debug!("Calling recvmmsg() syscall with timeout...");
     // Perform batch receive
     match recvmmsg(
         socket_fd,
         &mut headers,
         iovecs.iter_mut(),
-        MsgFlags::MSG_DONTWAIT,
-        None,
+        MsgFlags::empty(),  // Don't use MSG_DONTWAIT - let timeout handle waiting
+        timeout,
     ) {
         Ok(msgs_received) => {
             let mut results = Vec::new();
@@ -652,6 +666,8 @@ impl TftpServer {
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         let batch_size = batch_config.max_batch_size;
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        let batch_timeout_us = batch_config.batch_timeout_us;
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         let adaptive_batching_enabled = batch_config.enable_adaptive_batching;
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
         let adaptive_threshold = batch_config.adaptive_batch_threshold;
@@ -679,8 +695,14 @@ impl TftpServer {
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             let use_batch_recv = if adaptive_batching_enabled {
                 let current_clients = active_clients.load(Ordering::Relaxed);
-                current_clients >= adaptive_threshold && base_batch_enabled
+                let should_batch = current_clients >= adaptive_threshold && base_batch_enabled;
+                debug!(
+                    "Adaptive batching: clients={}, threshold={}, base_enabled={}, will_use_batch={}",
+                    current_clients, adaptive_threshold, base_batch_enabled, should_batch
+                );
+                should_batch
             } else {
+                debug!("Using fixed batching mode: enabled={}", base_batch_enabled);
                 base_batch_enabled
             };
 
@@ -690,12 +712,13 @@ impl TftpServer {
             // Phase 2: Try batch receive first on supported platforms
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             if use_batch_recv {
+                debug!("Attempting batch receive with batch_size={}", batch_size);
                 // Prepare batch buffers
                 let mut buffers: Vec<Vec<u8>> = (0..batch_size)
                     .map(|_| vec![0u8; MAX_PACKET_SIZE])
                     .collect();
 
-                match batch_recv_packets(&socket, &mut buffers, batch_size) {
+                match batch_recv_packets(&socket, &mut buffers, batch_size, batch_timeout_us) {
                     Ok(packets) if !packets.is_empty() => {
                         // Process each received packet
                         for (i, (size, client_addr)) in packets.iter().enumerate() {
@@ -709,6 +732,7 @@ impl TftpServer {
                             let write_config = self.write_config.clone();
                             let audit_enabled = self.audit_enabled;
                             let file_io_config = self.config.performance.platform.file_io.clone();
+                            let default_windowsize = self.config.performance.default_windowsize;
                             let pool = buffer_pool.clone();
                             let addr = *client_addr;
                             let client_counter = active_clients.clone();
@@ -726,6 +750,7 @@ impl TftpServer {
                                     write_config,
                                     audit_enabled,
                                     file_io_config,
+                                    default_windowsize,
                                 )
                                 .await
                                 {
@@ -740,10 +765,13 @@ impl TftpServer {
                         continue;
                     }
                     Ok(_) => {
-                        // No packets available, fall through to regular recv_from
+                        // Timeout expired with no packets - retry batch receive
+                        debug!("Batch receive timeout, retrying...");
+                        continue;
                     }
                     Err(e) => {
-                        warn!("Batch receive error, falling back to single recv: {}", e);
+                        warn!("Batch receive error ({}), falling back to single recv", e);
+                        // Fall through to single recv_from on actual errors
                     }
                 }
             }
@@ -764,6 +792,7 @@ impl TftpServer {
                     let write_config = self.write_config.clone();
                     let audit_enabled = self.audit_enabled;
                     let file_io_config = self.config.performance.platform.file_io.clone();
+                    let default_windowsize = self.config.performance.default_windowsize;
                     let pool = buffer_pool.clone();
                     let client_counter = active_clients.clone();
 
@@ -780,6 +809,7 @@ impl TftpServer {
                             write_config,
                             audit_enabled,
                             file_io_config,
+                            default_windowsize,
                         )
                         .await
                         {
@@ -822,6 +852,7 @@ impl TftpServer {
         write_config: WriteConfig,
         audit_enabled: bool,
         file_io_config: config::FileIoConfig,
+        default_windowsize: usize,
     ) -> Result<()> {
         let mut bytes = BytesMut::from(&data[..]);
 
@@ -865,7 +896,10 @@ impl TftpServer {
                 }
 
                 // Parse options (RFC 2347)
-                let mut options = TftpOptions::default();
+                let mut options = TftpOptions {
+                    windowsize: default_windowsize,
+                    ..TftpOptions::default()
+                };
                 let mut requested_options = HashMap::new();
                 let mut multicast_requested = false;
 
@@ -1158,7 +1192,10 @@ impl TftpServer {
                 }
 
                 // Parse options (RFC 2347)
-                let mut options = TftpOptions::default();
+                let mut options = TftpOptions {
+                    windowsize: default_windowsize,
+                    ..TftpOptions::default()
+                };
                 let mut requested_options = HashMap::new();
 
                 while bytes.remaining() > 0 {
