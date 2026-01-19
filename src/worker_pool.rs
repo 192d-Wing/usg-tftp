@@ -150,11 +150,11 @@ impl WorkerPool {
     pub async fn start(
         self,
         socket: Arc<UdpSocket>,
-        root_dir: std::path::PathBuf,
-        write_config: WriteConfig,
-        max_file_size_bytes: u64,
-        audit_enabled: bool,
-        multicast_server: Option<Arc<crate::multicast::MulticastTftpServer>>,
+        _root_dir: std::path::PathBuf,
+        _write_config: WriteConfig,
+        _max_file_size_bytes: u64,
+        _audit_enabled: bool,
+        _multicast_server: Option<Arc<crate::multicast::MulticastTftpServer>>,
     ) -> Result<()> {
         let worker_count = self.config.performance.platform.worker_pool.worker_count;
 
@@ -166,7 +166,7 @@ impl WorkerPool {
         let sender_stats = self.sender_stats.clone();
 
         // Spawn master receiver thread
-        let master_handle = {
+        let _master_handle = {
             let socket = socket.clone();
             let config = self.config.clone();
             let workers = self.worker_senders.clone();
@@ -180,20 +180,19 @@ impl WorkerPool {
         };
 
         // Spawn worker threads
-        let mut worker_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
-        for (worker_id, rx) in self.worker_senders.iter().enumerate() {
+        let _worker_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+        for (_worker_id, _rx) in self.worker_senders.iter().enumerate() {
             // Create worker receiver from the channel
             // Note: We need to refactor this to properly pass receivers
             // For now, this is a placeholder structure
-            info!("Worker {} would be spawned here", worker_id);
             // TODO: Implement worker thread spawning
         }
 
         // Spawn sender thread
-        let sender_handle = {
+        let _sender_handle = {
             let socket = socket.clone();
             let config = self.config.clone();
-            let mut rx = self.sender_receiver;
+            let rx = self.sender_receiver;
             let stats = self.sender_stats.clone();
 
             tokio::spawn(async move {

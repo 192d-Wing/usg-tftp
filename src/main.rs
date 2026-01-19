@@ -710,7 +710,7 @@ impl TftpServer {
             };
 
             #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
-            let use_batch_recv = false;
+            let _use_batch_recv = false;
 
             // Phase 2: Try batch receive first on supported platforms
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
