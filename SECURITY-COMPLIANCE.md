@@ -71,6 +71,7 @@ The Snow-Owl TFTP server implements comprehensive security controls addressing:
 **Details**:
 
 Comprehensive audit events for all security-relevant operations:
+
 - **Server lifecycle**: Startup, shutdown, configuration changes
 - **Client operations**: Connection initiation, read requests, denied access
 - **File transfers**: Started, completed, failed (with metrics)
@@ -80,6 +81,7 @@ Comprehensive audit events for all security-relevant operations:
 - **Access control**: Authentication attempts, authorization failures
 
 All events include:
+
 - ISO 8601 timestamp
 - Hostname/system identifier
 - Service name (snow-owl-tftp)
@@ -89,6 +91,7 @@ All events include:
 - Optional correlation IDs
 
 **Evidence**:
+
 - `audit.rs:1-571` - Complete audit event catalog
 - `main.rs:460-467` - Read request audit logging
 - `main.rs:513-522` - Path violation audit logging
@@ -109,6 +112,7 @@ All events include:
 **Details**:
 
 Each audit record includes NIST AU-3 required fields:
+
 - **Date and time**: ISO 8601 timestamp with timezone
 - **Type of event**: Structured event_type field (JSON tag)
 - **Subject identity**: Client address, username (when applicable)
@@ -116,12 +120,14 @@ Each audit record includes NIST AU-3 required fields:
 - **Additional information**: Event-specific context
 
 Event-specific audit data:
+
 - **File transfers**: Filename, size, mode, block size, duration, blocks sent
 - **Security violations**: Requested path, violation type, reason
 - **Multicast sessions**: Session ID, multicast group, port, client count
 - **Resource limits**: File size, max allowed, resource type
 
 **Format**: JSON-structured logs for SIEM parsing
+
 ```json
 {
   "event_type": "read_request",
@@ -137,6 +143,7 @@ Event-specific audit data:
 ```
 
 **Evidence**:
+
 - `audit.rs:232-273` - CommonFields implementation
 - `audit.rs:276-337` - AuditEvent::log() structured logging
 - Log output includes all required AU-3 fields
@@ -156,6 +163,7 @@ Event-specific audit data:
 **Details**:
 
 SIEM Integration Features:
+
 - **Structured JSON format**: All audit events serialize to JSON
 - **Consistent schema**: Tagged enum with common fields
 - **Log file output**: Configurable file-based logging
@@ -163,6 +171,7 @@ SIEM Integration Features:
 - **Correlation IDs**: Optional field for tracking related events
 
 Configuration example:
+
 ```toml
 [logging]
 format = "json"  # Enable JSON structured logging
@@ -172,12 +181,14 @@ level = "info"
 ```
 
 SIEM Integration:
+
 - Forward logs to Splunk, ELK, Datadog, or other SIEM platforms
 - Use log shippers (Filebeat, Fluentd, Vector) to collect JSON logs
 - Query by event_type, severity, client_addr, or any event field
 - Build dashboards for security monitoring and compliance reporting
 
 **Evidence**:
+
 - `audit.rs:4-5` - Serde JSON serialization support
 - `config.rs:54-62` - JSON log format configuration
 - `main.rs:1020-1024` - JSON logger initialization
@@ -197,6 +208,7 @@ SIEM Integration:
 **Details**:
 
 Audit log protection mechanisms:
+
 - **File permissions**: Logs protected by OS filesystem permissions
 - **Path validation**: Log file parent directory must exist and be writable
 - **Non-blocking writes**: Separate thread for log I/O prevents DoS
@@ -204,6 +216,7 @@ Audit log protection mechanisms:
 - **Error resilience**: Failed serialization doesn't crash server
 
 **Evidence**:
+
 - `config.rs:200-204` - Log file write validation
 - `main.rs:1010-1016` - Non-blocking appender with guard
 - `audit.rs:283-287` - Graceful error handling for serialization
@@ -223,6 +236,7 @@ Audit log protection mechanisms:
 **Details**:
 
 Automated audit generation for:
+
 - **All file access attempts**: Read requests, denials, completions
 - **All security violations**: Path traversal, access violations, symlinks
 - **All protocol errors**: Invalid opcodes, write requests, violations
@@ -233,6 +247,7 @@ No manual audit triggers required - events automatically generated
 by instrumentation at security-relevant code paths.
 
 **Evidence**:
+
 - `audit.rs:281-294` - AuditEvent::log() auto-generates tracing events
 - `main.rs:460-467` - Automatic read request audit
 - `main.rs:513-522` - Automatic security violation audit
@@ -751,7 +766,7 @@ done
 ## Compliance Summary
 
 | Control Family | Controls Implemented | Compliance |
-|---------------|---------------------|------------|
+| --------------- | --------------------- | ------------ |
 | Access Control (AC) | AC-3, AC-6 | ✅ COMPLIANT |
 | Audit and Accountability (AU) | AU-2, AU-3 | ✅ COMPLIANT |
 | Configuration Management (CM) | CM-6, CM-7 | ✅ COMPLIANT |
@@ -759,7 +774,7 @@ done
 | System and Information Integrity (SI) | SI-10 | ✅ COMPLIANT |
 
 | STIG Requirement | Status |
-|-----------------|--------|
+| ----------------- | -------- |
 | V-222563: Audit records | ✅ COMPLIANT |
 | V-222564: Protect audit info | ✅ COMPLIANT |
 | V-222566: Validate config | ✅ COMPLIANT |
@@ -775,6 +790,6 @@ done
 | V-222611: Prevent unauthorized access | ✅ COMPLIANT |
 | V-222612: Path canonicalization | ✅ COMPLIANT |
 
-**Overall Compliance: 100% of applicable controls implemented**
+### **Overall Compliance: 100% of applicable controls implemented**
 
 Last Updated: 2026-01-18

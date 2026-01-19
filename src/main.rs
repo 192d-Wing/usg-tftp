@@ -1279,7 +1279,10 @@ impl TftpServer {
             bytes_transferred += block_data.len() as u64;
 
             // RFC 1350: Transfer complete when data packet < block_size
-            if bytes_read < block_size {
+            // Check bytes_read (from file) not block_data.len() (after NETASCII conversion)
+            let is_last_block = bytes_read < block_size;
+
+            if is_last_block {
                 debug!("Transfer complete: {} blocks sent ({} bytes, streaming mode)", block_num, bytes_transferred);
                 if audit_enabled {
                     let duration_ms = start_time.elapsed().as_millis() as u64;

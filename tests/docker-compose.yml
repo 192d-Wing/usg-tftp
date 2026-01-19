@@ -1,0 +1,13 @@
+version: '3.8'
+
+services:
+  tftp-tests:
+    build:
+      context: ../../..
+      dockerfile: crates/snow-owl-tftp/tests/Dockerfile
+    container_name: snow-owl-tftp-tests
+    # Remove container after tests complete
+    rm: true
+    # Show test output
+    tty: true
+    stdin_open: true

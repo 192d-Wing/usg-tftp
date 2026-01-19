@@ -40,7 +40,7 @@ The server will automatically log all audit events to `/var/log/snow-owl/tftp-au
 
 ### Server Lifecycle Events
 
-**ServerStarted**
+#### **ServerStarted**
 
 ```json
 {
@@ -57,7 +57,7 @@ The server will automatically log all audit events to `/var/log/snow-owl/tftp-au
 
 ### File Access Events
 
-**ReadRequest**
+#### **ReadRequest**
 
 ```json
 {
@@ -73,7 +73,7 @@ The server will automatically log all audit events to `/var/log/snow-owl/tftp-au
 }
 ```
 
-**TransferCompleted**
+#### **TransferCompleted**
 
 ```json
 {
@@ -93,14 +93,15 @@ The server will automatically log all audit events to `/var/log/snow-owl/tftp-au
 }
 ```
 
-**Performance Metrics:**
+#### **Performance Metrics:**
+
 - `throughput_bps`: Transfer speed in bytes per second (useful for SLA monitoring)
 - `avg_block_time_ms`: Average time per block (identifies network latency issues)
 - `correlation_id`: Links related events (read_request → transfer_started → transfer_completed)
 
 ### Security Violation Events
 
-**PathTraversalAttempt**
+#### **PathTraversalAttempt**
 
 ```json
 {
@@ -115,7 +116,7 @@ The server will automatically log all audit events to `/var/log/snow-owl/tftp-au
 }
 ```
 
-**FileSizeLimitExceeded**
+#### **FileSizeLimitExceeded**
 
 ```json
 {
@@ -133,7 +134,7 @@ The server will automatically log all audit events to `/var/log/snow-owl/tftp-au
 
 ### Multicast Session Events
 
-**MulticastSessionCreated**
+#### **MulticastSessionCreated**
 
 ```json
 {
@@ -322,27 +323,27 @@ sudo systemctl restart datadog-agent
 
 **Security events facet:**
 
-```
+```text
 service:snow-owl-tftp severity:error
 ```
 
 **File transfer metrics:**
 
-```
+```text
 service:snow-owl-tftp event_type:transfer_completed
 @avg:duration_ms by @filename
 ```
 
 **Transfer performance monitoring:**
 
-```
+```text
 service:snow-owl-tftp event_type:transfer_completed
 @avg:throughput_bps by @filename
 ```
 
 **Slow transfer detection (< 100 KB/s):**
 
-```
+```text
 service:snow-owl-tftp event_type:transfer_completed throughput_bps:<102400
 ```
 
@@ -392,7 +393,7 @@ sudo /opt/aws/amazon-cloudwatch-agent/bin/amazon-cloudwatch-agent-ctl \
 
 **Security violations:**
 
-```
+```text
 fields @timestamp, event_type, client_addr, severity
 | filter severity = "error"
 | stats count() by event_type
@@ -447,7 +448,7 @@ Create `/etc/fluent/fluent.conf`:
 
 Create `/etc/logrotate.d/snow-owl-tftp`:
 
-```
+```text
 /var/log/snow-owl/tftp-audit.json {
     daily
     rotate 90
