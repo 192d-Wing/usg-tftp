@@ -1,0 +1,389 @@
+use clap::ValueEnum;
+use serde::{Deserialize, Serialize};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::path::PathBuf;
+
+use crate::error::{Result, TftpError};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TftpConfig {
+    pub root_dir: PathBuf,
+    pub bind_addr: SocketAddr,
+    pub multicast: MulticastConfig,
+    pub logging: LoggingConfig,
+    /// Maximum file size in bytes that can be served (default: 100MB)
+    /// Set to 0 for unlimited (not recommended for security)
+    pub max_file_size_bytes: u64,
+}
+
+impl Default for TftpConfig {
+    fn default() -> Self {
+        Self {
+            root_dir: PathBuf::from("/var/lib/snow-owl/tftp"),
+            bind_addr: SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 69),
+            multicast: MulticastConfig::default(),
+            logging: LoggingConfig::default(),
+            max_file_size_bytes: 104_857_600, // 100 MB default
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct LoggingConfig {
+    pub level: String,
+    pub format: LogFormat,
+    pub file: Option<PathBuf>,
+}
+
+impl Default for LoggingConfig {
+    fn default() -> Self {
+        Self {
+            level: "info".to_string(),
+            format: LogFormat::Text,
+            file: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum LogFormat {
+    Text,
+    Json,
+}
+
+/// Multicast TFTP configuration (RFC 2090)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct MulticastConfig {
+    pub enabled: bool,
+    pub multicast_addr: IpAddr,
+    pub multicast_ip_version: MulticastIpVersion,
+    pub multicast_port: u16,
+    pub max_clients: usize,
+    pub master_timeout_secs: u64,
+    pub retransmit_timeout_secs: u64,
+}
+
+impl Default for MulticastConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            multicast_addr: default_multicast_addr_v6(),
+            multicast_ip_version: MulticastIpVersion::V6,
+            multicast_port: default_multicast_port(),
+            max_clients: default_max_clients(),
+            master_timeout_secs: default_master_timeout(),
+            retransmit_timeout_secs: default_retransmit_timeout(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum MulticastIpVersion {
+    V4,
+    V6,
+}
+
+fn default_multicast_addr_v6() -> IpAddr {
+    IpAddr::V6(Ipv6Addr::new(0xff12, 0, 0, 0, 0, 0, 0x8000, 0x0001))
+}
+
+#[allow(dead_code)]
+fn default_multicast_addr_v4() -> IpAddr {
+    IpAddr::V4(Ipv4Addr::new(224, 0, 1, 1))
+}
+
+pub(crate) fn default_multicast_addr_for_version(version: MulticastIpVersion) -> IpAddr {
+    match version {
+        MulticastIpVersion::V4 => default_multicast_addr_v4(),
+        MulticastIpVersion::V6 => default_multicast_addr_v6(),
+    }
+}
+
+pub(crate) fn load_config(path: &std::path::Path) -> Result<TftpConfig> {
+    let contents = std::fs::read_to_string(path)?;
+    let config: TftpConfig = toml::from_str(&contents)
+        .map_err(|e| TftpError::Tftp(format!("Invalid config file {}: {}", path.display(), e)))?;
+    Ok(config)
+}
+
+pub(crate) fn write_default_config(path: &std::path::Path) -> Result<()> {
+    write_config(path, &TftpConfig::default())
+}
+
+pub(crate) fn write_config(path: &std::path::Path, config: &TftpConfig) -> Result<()> {
+    let contents = toml::to_string_pretty(config)
+        .map_err(|e| TftpError::Tftp(format!("Failed to serialize default config: {}", e)))?;
+    std::fs::write(path, contents)?;
+    Ok(())
+}
+
+/// Validate TFTP configuration for security and correctness
+///
+/// NIST 800-53 Controls:
+/// - CM-6: Configuration Settings (validate all configuration parameters)
+/// - AC-3: Access Enforcement (validate directory permissions)
+/// - SC-7: Boundary Protection (validate network bindings)
+/// - SC-5: Denial of Service Protection (validate resource limits)
+///
+/// STIG V-222564: Applications must protect configuration data
+/// STIG V-222566: Applications must validate configuration parameters
+/// STIG V-222602: Applications must enforce access restrictions
+pub(crate) fn validate_config(config: &TftpConfig, validate_bind: bool) -> Result<()> {
+    // NIST CM-6: Validate root directory is absolute path
+    // STIG V-222566: Configuration parameter validation
+    if !config.root_dir.is_absolute() {
+        return Err(TftpError::Tftp(
+            "root_dir must be an absolute path".to_string(),
+        ));
+    }
+
+    // NIST AC-3: Validate directory exists and is accessible
+    // STIG V-222602: Enforce access restrictions
+    match std::fs::metadata(&config.root_dir) {
+        Ok(meta) => {
+            if !meta.is_dir() {
+                return Err(TftpError::Tftp("root_dir must be a directory".to_string()));
+            }
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+            return Err(TftpError::Tftp(
+                "root_dir does not exist; create it or adjust config".to_string(),
+            ));
+        }
+        Err(e) => return Err(TftpError::Io(e)),
+    }
+
+    // NIST AC-3: Validate directory is readable
+    if let Err(e) = std::fs::read_dir(&config.root_dir) {
+        return Err(TftpError::Tftp(format!("root_dir is not readable: {}", e)));
+    }
+
+    if config.bind_addr.port() == 0 {
+        return Err(TftpError::Tftp(
+            "bind_addr port must be non-zero".to_string(),
+        ));
+    }
+
+    if validate_bind
+        && let Err(e) = std::net::UdpSocket::bind(config.bind_addr) {
+            return Err(TftpError::Tftp(format!(
+                "bind_addr is not available: {}",
+                e
+            )));
+        }
+
+    if !(1024..=65535).contains(&config.multicast.multicast_port) {
+        return Err(TftpError::Tftp(
+            "multicast_port must be in range 1024-65535".to_string(),
+        ));
+    }
+
+    if let Some(ref log_file) = config.logging.file {
+        let parent = log_file.parent().ok_or_else(|| {
+            TftpError::Tftp("logging.file must include a parent directory".to_string())
+        })?;
+        match std::fs::metadata(parent) {
+            Ok(meta) => {
+                if !meta.is_dir() {
+                    return Err(TftpError::Tftp(
+                        "logging.file parent must be a directory".to_string(),
+                    ));
+                }
+            }
+            Err(e) => return Err(TftpError::Tftp(format!("logging.file parent error: {}", e))),
+        }
+        let _ = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log_file)
+            .map_err(|e| TftpError::Tftp(format!("logging.file not writable: {}", e)))?;
+    }
+
+    validate_multicast_config(&config.multicast)?;
+    Ok(())
+}
+
+pub(crate) fn validate_multicast_config(config: &MulticastConfig) -> Result<()> {
+    let version_matches = matches!(
+        (config.multicast_ip_version, config.multicast_addr),
+        (MulticastIpVersion::V4, IpAddr::V4(_)) | (MulticastIpVersion::V6, IpAddr::V6(_))
+    );
+
+    if !version_matches {
+        return Err(TftpError::Tftp(
+            "Multicast address does not match multicast IP version".to_string(),
+        ));
+    }
+
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(name: &str) -> std::io::Result<PathBuf> {
+        let mut dir = std::env::temp_dir();
+        dir.push(format!(
+            "snow_owl_tftp_test_{}_{}",
+            name,
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir)?;
+        Ok(dir)
+    }
+
+    #[test]
+    fn parses_minimal_toml() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let root_dir = temp_dir("parse")?;
+        let toml = format!(
+            r#"
+root_dir = "{}"
+bind_addr = "127.0.0.1:6969"
+"#,
+            root_dir.display()
+        );
+        let config: TftpConfig = toml::from_str(&toml)?;
+        validate_config(&config, false)?;
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_non_absolute_root_dir() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = TftpConfig::default();
+        config.root_dir = PathBuf::from("relative/path");
+        match validate_config(&config, false) {
+            Ok(()) => return Err("expected error for relative root_dir".into()),
+            Err(err) => {
+                assert!(format!("{err}").contains("root_dir must be an absolute path"));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_unreadable_root_dir() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = TftpConfig::default();
+        config.root_dir = PathBuf::from("/nonexistent/snow-owl-tftp");
+        match validate_config(&config, false) {
+            Ok(()) => return Err("expected error for missing root_dir".into()),
+            Err(err) => {
+                assert!(format!("{err}").contains("root_dir does not exist"));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_zero_bind_port() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = TftpConfig::default();
+        config.root_dir = temp_dir("bind")?;
+        config.bind_addr = "127.0.0.1:0".parse()?;
+        match validate_config(&config, false) {
+            Ok(()) => return Err("expected error for zero bind port".into()),
+            Err(err) => {
+                assert!(format!("{err}").contains("bind_addr port must be non-zero"));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_multicast_port_out_of_range() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let mut config = TftpConfig::default();
+        config.root_dir = temp_dir("mcast-port")?;
+        config.multicast.multicast_port = 100;
+        match validate_config(&config, false) {
+            Ok(()) => return Err("expected error for multicast_port range".into()),
+            Err(err) => {
+                assert!(format!("{err}").contains("multicast_port must be in range"));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_mismatched_multicast_version() -> std::result::Result<(), Box<dyn std::error::Error>>
+    {
+        let mut config = TftpConfig::default();
+        config.root_dir = temp_dir("mcast-ver")?;
+        config.multicast.multicast_ip_version = MulticastIpVersion::V4;
+        config.multicast.multicast_addr =
+            IpAddr::V6(Ipv6Addr::new(0xff12, 0, 0, 0, 0, 0, 0x8000, 0x0001));
+        match validate_config(&config, false) {
+            Ok(()) => return Err("expected error for multicast version mismatch".into()),
+            Err(err) => {
+                assert!(format!("{err}").contains("Multicast address does not match"));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_logging_file_with_missing_parent(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let mut config = TftpConfig::default();
+        config.root_dir = temp_dir("logfile")?;
+        config.logging.file = Some(PathBuf::from("/nonexistent/snow-owl-tftp/log.txt"));
+        match validate_config(&config, false) {
+            Ok(()) => return Err("expected error for logging.file parent".into()),
+            Err(err) => {
+                assert!(format!("{err}").contains("logging.file parent error"));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn validates_bind_addr_availability_on_free_port(
+    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0")?;
+        let port = socket.local_addr()?.port();
+        drop(socket);
+
+        let mut config = TftpConfig::default();
+        config.root_dir = temp_dir("bind-available")?;
+        config.bind_addr = format!("127.0.0.1:{port}").parse()?;
+        validate_config(&config, true)?;
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_bind_addr_when_in_use() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let socket = std::net::UdpSocket::bind("127.0.0.1:0")?;
+        let port = socket.local_addr()?.port();
+
+        let mut config = TftpConfig::default();
+        config.root_dir = temp_dir("bind-in-use")?;
+        config.bind_addr = format!("127.0.0.1:{port}").parse()?;
+        match validate_config(&config, true) {
+            Ok(()) => return Err("expected error for bind_addr in use".into()),
+            Err(err) => {
+                assert!(format!("{err}").contains("bind_addr is not available"));
+            }
+        }
+        Ok(())
+    }
+}
+
+fn default_multicast_port() -> u16 {
+    1758
+}
+
+fn default_max_clients() -> usize {
+    10
+}
+
+fn default_master_timeout() -> u64 {
+    30
+}
+
+fn default_retransmit_timeout() -> u64 {
+    5
+}

@@ -1,5 +1,4 @@
 use bytes::{BufMut, BytesMut};
-use snow_owl_core::*;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
@@ -11,7 +10,9 @@ use tokio::sync::RwLock;
 use tokio::time::{timeout, Duration};
 use tracing::{debug, error, info, warn};
 
-use crate::{TftpOpcode, TransferMode, TftpOptions, DEFAULT_BLOCK_SIZE};
+use crate::config::MulticastConfig;
+use crate::error::{Result, TftpError};
+use crate::{TftpOpcode, TftpOptions, TransferMode, DEFAULT_BLOCK_SIZE};
 
 /// RFC 2090 - TFTP Multicast Option Extension
 ///
@@ -28,7 +29,6 @@ use crate::{TftpOpcode, TransferMode, TftpOptions, DEFAULT_BLOCK_SIZE};
 /// - SC-5: Denial of Service Protection (efficient bandwidth usage)
 /// - AC-3: Access Enforcement (session isolation)
 /// - AU-2: Audit Events (session and transfer logging)
-
 const MULTICAST_OPTION: &str = "multicast";
 
 /// Client state in a multicast session
@@ -153,7 +153,7 @@ impl MulticastSession {
                 "Session {} rejected client {}: max clients ({}) reached",
                 self.session_id, addr, self.max_clients
             );
-            return Err(SnowOwlError::Tftp(format!(
+            return Err(TftpError::Tftp(format!(
                 "Maximum clients ({}) reached",
                 self.max_clients
             )));
@@ -293,11 +293,10 @@ impl MulticastSession {
     /// - AU-2: Audit Events (master election logging)
     fn elect_new_master(&mut self) {
         // Clear old master
-        if let Some(old_master) = self.master_client {
-            if let Some(client) = self.clients.get_mut(&old_master) {
+        if let Some(old_master) = self.master_client
+            && let Some(client) = self.clients.get_mut(&old_master) {
                 client.is_master = false;
             }
-        }
 
         // Elect first available client as new master
         if let Some((addr, _)) = self.clients.iter().next() {
@@ -312,7 +311,10 @@ impl MulticastSession {
             );
         } else {
             self.master_client = None;
-            info!("Session {}: no clients available for master", self.session_id);
+            info!(
+                "Session {}: no clients available for master",
+                self.session_id
+            );
         }
     }
 
@@ -384,30 +386,28 @@ impl MulticastTftpServer {
         let file_path = self.validate_file_path(&filename)?;
 
         // NIST SI-10: Validate file exists and is readable
-        let _file_metadata = tokio::fs::metadata(&file_path).await.map_err(|_| {
-            SnowOwlError::Tftp("File not found".to_string())
-        })?;
+        let _file_metadata = tokio::fs::metadata(&file_path)
+            .await
+            .map_err(|_| TftpError::Tftp("File not found".to_string()))?;
 
         // Find or create multicast session for this file
         let session_key = format!("{}:{:?}", filename, mode);
-        let session = self.get_or_create_session(
-            session_key.clone(),
-            file_path.clone(),
-            mode.clone(),
-            options.clone(),
-        ).await?;
+        let session = self
+            .get_or_create_session(
+                session_key.clone(),
+                file_path.clone(),
+                mode.clone(),
+                options.clone(),
+            )
+            .await?;
 
         // Add client to session
         let mut session_lock = session.write().await;
         let is_master = session_lock.add_client(client_addr)?;
 
         // RFC 2090: Send OACK with multicast option to client
-        self.send_multicast_oack(
-            &response_socket,
-            client_addr,
-            &session_lock,
-            is_master,
-        ).await?;
+        self.send_multicast_oack(&response_socket, client_addr, &session_lock, is_master)
+            .await?;
 
         drop(session_lock);
 
@@ -554,19 +554,27 @@ impl MulticastTftpServer {
             let block_data = &file_data[offset..offset + bytes_to_send];
 
             // Send DATA packet to multicast group
-            Self::send_multicast_data(&socket, block_num, block_data, multicast_addr, multicast_port).await?;
+            Self::send_multicast_data(
+                &socket,
+                block_num,
+                block_data,
+                multicast_addr,
+                multicast_port,
+            )
+            .await?;
 
             // Wait for all clients to ACK (with timeout)
             let ack_result = timeout(retransmit_timeout, async {
                 loop {
                     let session_lock = session.read().await;
                     if session_lock.all_clients_acked(block_num) {
-                        return Ok::<(), SnowOwlError>(());
+                        return Ok::<(), TftpError>(());
                     }
                     drop(session_lock);
                     tokio::time::sleep(Duration::from_millis(100)).await;
                 }
-            }).await;
+            })
+            .await;
 
             match ack_result {
                 Ok(_) => {
@@ -631,11 +639,17 @@ impl MulticastTftpServer {
         match multicast_addr {
             IpAddr::V4(addr) => {
                 socket.set_multicast_ttl_v4(4)?; // Local network scope
-                info!("Multicast socket created for IPv4: {}:{}", addr, multicast_port);
+                info!(
+                    "Multicast socket created for IPv4: {}:{}",
+                    addr, multicast_port
+                );
             }
             IpAddr::V6(addr) => {
                 socket.set_multicast_loop_v6(false)?;
-                info!("Multicast socket created for IPv6: {}:{}", addr, multicast_port);
+                info!(
+                    "Multicast socket created for IPv6: {}:{}",
+                    addr, multicast_port
+                );
             }
         }
 
@@ -708,7 +722,24 @@ impl MulticastTftpServer {
             );
 
             for block_num in retransmit_blocks {
-                let offset = ((block_num - 1) as usize) * block_size;
+                // Security: Use checked arithmetic to prevent integer overflow
+                // Calculate offset safely: (block_num - 1) * block_size
+                //
+                // NIST 800-53 Controls:
+                // - SI-10: Information Input Validation (validate arithmetic operations)
+                // - SC-5: Denial of Service Protection (prevent integer overflow)
+                //
+                // STIG V-222577: Applications must validate all input
+                // STIG V-222578: Applications must protect from integer overflow
+                let block_index = (block_num - 1) as usize;
+                let offset = match block_index.checked_mul(block_size) {
+                    Some(off) => off,
+                    None => {
+                        error!("Block offset overflow for block {}", block_num);
+                        continue;
+                    }
+                };
+
                 if offset >= file_data.len() {
                     continue;
                 }
@@ -723,7 +754,8 @@ impl MulticastTftpServer {
                     block_data,
                     session_lock.multicast_addr,
                     session_lock.multicast_port,
-                ).await?;
+                )
+                .await?;
                 drop(session_lock);
 
                 // Wait for ACKs
@@ -734,24 +766,65 @@ impl MulticastTftpServer {
         Ok(())
     }
 
-    /// Validate and resolve file path
+    /// Validate and resolve file path for multicast transfers
     ///
-    /// NIST Controls:
+    /// NIST 800-53 Controls:
     /// - AC-3: Access Enforcement (path validation)
     /// - SI-10: Information Input Validation (prevent traversal)
+    /// - SC-7(12): Host-Based Boundary Protection (filesystem boundary enforcement)
+    /// - AC-6: Least Privilege (restrict to authorized directories)
+    ///
+    /// STIG V-222602: Applications must enforce access restrictions
+    /// STIG V-222603: Applications must protect against directory traversal
+    /// STIG V-222604: Applications must validate file paths
+    /// STIG V-222612: Applications must implement path canonicalization
     fn validate_file_path(&self, filename: &str) -> Result<PathBuf> {
+        // NIST SI-10: Normalize and validate filename
+        // STIG V-222603: Prevent path traversal
         let filename = filename.replace('\\', "/");
         if filename.contains("..") {
-            return Err(SnowOwlError::Tftp("Invalid filename".to_string()));
+            return Err(TftpError::Tftp("Invalid filename".to_string()));
         }
 
+        // NIST AC-3: Enforce base path restriction
         let file_path = self.root_dir.join(filename.trim_start_matches('/'));
 
-        let canonical_root = self.root_dir.canonicalize().unwrap_or_else(|_| self.root_dir.clone());
+        // Security: Detect and reject symlinks to prevent TOCTOU attacks
+        // NIST AC-3: Additional access control validation
+        // STIG V-222604: Validate file type
+        match std::fs::symlink_metadata(&file_path) {
+            Ok(metadata) => {
+                if metadata.file_type().is_symlink() {
+                    return Err(TftpError::Tftp("Symlinks are not allowed".to_string()));
+                }
+            }
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                // File doesn't exist - this is OK, will fail later at open
+            }
+            Err(_) => {
+                return Err(TftpError::Tftp("Access denied".to_string()));
+            }
+        }
+
+        // NIST SC-7(12): Enforce filesystem boundary
+        // STIG V-222612: Path canonicalization
+        let canonical_root = self
+            .root_dir
+            .canonicalize()
+            .map_err(|_| TftpError::Tftp("Root directory error".to_string()))?;
+
+        // NIST AC-6: Least privilege boundary check
         if let Ok(canonical_file) = file_path.canonicalize() {
             if !canonical_file.starts_with(&canonical_root) {
-                return Err(SnowOwlError::Tftp("Access denied".to_string()));
+                return Err(TftpError::Tftp("Access denied".to_string()));
             }
+        } else {
+            // File doesn't exist yet - check that the parent is within bounds
+            if let Some(parent) = file_path.parent()
+                && let Ok(canonical_parent) = parent.canonicalize()
+                    && !canonical_parent.starts_with(&canonical_root) {
+                        return Err(TftpError::Tftp("Access denied".to_string()));
+                    }
         }
 
         Ok(file_path)
