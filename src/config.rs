@@ -247,12 +247,17 @@ mod tests {
     #[test]
     fn parses_minimal_toml() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let root_dir = temp_dir("parse")?;
+        let log_dir = temp_dir("parse_log")?;
         let toml = format!(
             r#"
 root_dir = "{}"
 bind_addr = "127.0.0.1:6969"
+
+[logging]
+file = "{}/tftp.log"
 "#,
-            root_dir.display()
+            root_dir.display(),
+            log_dir.display()
         );
         let config: TftpConfig = toml::from_str(&toml)?;
         validate_config(&config, false)?;
@@ -261,8 +266,10 @@ bind_addr = "127.0.0.1:6969"
 
     #[test]
     fn rejects_non_absolute_root_dir() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let log_dir = temp_dir("non_abs_log")?;
         let mut config = TftpConfig::default();
         config.root_dir = PathBuf::from("relative/path");
+        config.logging.file = Some(log_dir.join("tftp.log"));
         match validate_config(&config, false) {
             Ok(()) => return Err("expected error for relative root_dir".into()),
             Err(err) => {
@@ -274,8 +281,10 @@ bind_addr = "127.0.0.1:6969"
 
     #[test]
     fn rejects_unreadable_root_dir() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let log_dir = temp_dir("unreadable_log")?;
         let mut config = TftpConfig::default();
         config.root_dir = PathBuf::from("/nonexistent/snow-owl-tftp");
+        config.logging.file = Some(log_dir.join("tftp.log"));
         match validate_config(&config, false) {
             Ok(()) => return Err("expected error for missing root_dir".into()),
             Err(err) => {
@@ -317,8 +326,10 @@ bind_addr = "127.0.0.1:6969"
     #[test]
     fn rejects_mismatched_multicast_version() -> std::result::Result<(), Box<dyn std::error::Error>>
     {
+        let log_dir = temp_dir("mcast_ver_log")?;
         let mut config = TftpConfig::default();
         config.root_dir = temp_dir("mcast-ver")?;
+        config.logging.file = Some(log_dir.join("tftp.log"));
         config.multicast.multicast_ip_version = MulticastIpVersion::V4;
         config.multicast.multicast_addr =
             IpAddr::V6(Ipv6Addr::new(0xff12, 0, 0, 0, 0, 0, 0x8000, 0x0001));
@@ -353,9 +364,11 @@ bind_addr = "127.0.0.1:6969"
         let port = socket.local_addr()?.port();
         drop(socket);
 
+        let log_dir = temp_dir("bind_av_log")?;
         let mut config = TftpConfig::default();
         config.root_dir = temp_dir("bind-available")?;
         config.bind_addr = format!("127.0.0.1:{port}").parse()?;
+        config.logging.file = Some(log_dir.join("tftp.log"));
         validate_config(&config, true)?;
         Ok(())
     }
