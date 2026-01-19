@@ -37,6 +37,7 @@ pub struct TftpConfig {
     pub multicast: MulticastConfig,
     pub logging: LoggingConfig,
     pub write_config: WriteConfig,
+    pub performance: PerformanceConfig,
     /// Maximum file size in bytes that can be served (default: 100MB)
     /// Set to 0 for unlimited (not recommended for security)
     pub max_file_size_bytes: u64,
@@ -50,6 +51,7 @@ impl Default for TftpConfig {
             multicast: MulticastConfig::default(),
             logging: LoggingConfig::default(),
             write_config: WriteConfig::default(),
+            performance: PerformanceConfig::default(),
             max_file_size_bytes: 104_857_600, // 100 MB default
         }
     }
@@ -556,6 +558,43 @@ impl Default for WriteConfig {
             enabled: false,
             allow_overwrite: false,
             allowed_patterns: Vec::new(),
+        }
+    }
+}
+
+/// Performance tuning configuration
+///
+/// These settings control performance optimizations for high-throughput scenarios
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PerformanceConfig {
+    /// Default block size for transfers (bytes)
+    /// RFC 1350 standard is 512, but larger sizes improve throughput
+    /// Valid range: 512-65464
+    pub default_block_size: usize,
+
+    /// Buffer pool size for packet reuse
+    /// Larger pools reduce allocations but use more memory
+    pub buffer_pool_size: usize,
+
+    /// Threshold for streaming vs buffered mode (bytes)
+    /// Files smaller than this use full buffering for NETASCII conversion
+    /// Larger files use streaming to minimize memory usage
+    pub streaming_threshold: u64,
+
+    /// Audit log sampling rate (0.0-1.0)
+    /// 1.0 = log all events, 0.5 = log 50% of events
+    /// Lower values reduce audit overhead for high-volume servers
+    pub audit_sampling_rate: f64,
+}
+
+impl Default for PerformanceConfig {
+    fn default() -> Self {
+        Self {
+            default_block_size: 8192, // 8KB for better throughput
+            buffer_pool_size: 128,
+            streaming_threshold: 1_048_576, // 1MB
+            audit_sampling_rate: 1.0, // Log everything by default
         }
     }
 }

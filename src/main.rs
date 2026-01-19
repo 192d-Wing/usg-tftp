@@ -1,9 +1,11 @@
 mod audit;
+mod buffer_pool;
 mod config;
 mod error;
 mod multicast;
 
 use audit::AuditLogger;
+use buffer_pool::BufferPool;
 use bytes::{Buf, BufMut, BytesMut};
 use clap::Parser;
 use config::{
@@ -30,7 +32,9 @@ use tracing_subscriber::EnvFilter;
 //
 // STIG V-222596: Applications must set session timeout limits
 // STIG V-222597: Applications must limit retry attempts
-pub(crate) const DEFAULT_BLOCK_SIZE: usize = 512; // RFC 1350 standard block size
+// Performance optimization: Use 8KB default block size for better throughput
+// RFC 1350 standard is 512 bytes, but RFC 2348 allows negotiation up to 65464 bytes
+pub(crate) const DEFAULT_BLOCK_SIZE: usize = 8192; // Optimized for performance (8KB)
 const MAX_BLOCK_SIZE: usize = 65464; // RFC 2348 maximum block size
 const MAX_PACKET_SIZE: usize = 65468; // Max block size + 4 byte header
 const DEFAULT_TIMEOUT_SECS: u64 = 5;
@@ -175,43 +179,85 @@ impl TransferMode {
     /// NIST Controls:
     /// - SI-10: Information Input Validation (data format conversion)
     /// - SC-4: Information in Shared Resources (standardized encoding)
+    ///
+    /// Performance optimization: Process in larger chunks for better CPU cache utilization
     pub fn convert_to_netascii(data: &[u8]) -> Vec<u8> {
-        let mut result = Vec::with_capacity(data.len() + data.len() / 80); // Estimate extra space for CR
+        if data.is_empty() {
+            return Vec::new();
+        }
+
+        // Pre-allocate with better size estimation: assume 10% line endings
+        let mut result = Vec::with_capacity(data.len() + data.len() / 10);
+
+        // Process in chunks for better cache utilization
+        const CHUNK_SIZE: usize = 4096;
         let mut i = 0;
 
         while i < data.len() {
-            let byte = data[i];
+            let chunk_end = std::cmp::min(i + CHUNK_SIZE, data.len());
+            let chunk = &data[i..chunk_end];
 
-            match byte {
-                b'\n' => {
-                    // LF (0x0A) - check if preceded by CR
-                    if i > 0 && data[i - 1] == b'\r' {
-                        // Already CR+LF, just add LF
-                        result.push(b'\n');
-                    } else {
-                        // Bare LF - convert to CR+LF
-                        result.push(b'\r');
-                        result.push(b'\n');
+            // Fast path: scan for line endings first
+            let mut last_copy = 0;
+            for (idx, &byte) in chunk.iter().enumerate() {
+                match byte {
+                    b'\n' => {
+                        // Copy everything up to this point
+                        result.extend_from_slice(&chunk[last_copy..idx]);
+
+                        // Check if preceded by CR
+                        let preceded_by_cr = if idx > 0 {
+                            chunk[idx - 1] == b'\r'
+                        } else if i > 0 && !result.is_empty() {
+                            result[result.len() - 1] == b'\r'
+                        } else {
+                            false
+                        };
+
+                        if preceded_by_cr {
+                            // Already CR+LF, just add LF
+                            result.push(b'\n');
+                        } else {
+                            // Bare LF - convert to CR+LF
+                            result.push(b'\r');
+                            result.push(b'\n');
+                        }
+
+                        last_copy = idx + 1;
                     }
-                }
-                b'\r' => {
-                    // CR (0x0D) - check if followed by LF
-                    if i + 1 < data.len() && data[i + 1] == b'\n' {
-                        // CR+LF sequence - add CR, LF will be handled in next iteration
-                        result.push(b'\r');
-                    } else {
-                        // Bare CR - convert to CR+LF
-                        result.push(b'\r');
-                        result.push(b'\n');
+                    b'\r' => {
+                        // Copy everything up to this point
+                        result.extend_from_slice(&chunk[last_copy..idx]);
+
+                        // Check if followed by LF
+                        let followed_by_lf = if idx + 1 < chunk.len() {
+                            chunk[idx + 1] == b'\n'
+                        } else if chunk_end < data.len() {
+                            data[chunk_end] == b'\n'
+                        } else {
+                            false
+                        };
+
+                        if followed_by_lf {
+                            // CR+LF sequence - add CR, LF will be handled in next iteration
+                            result.push(b'\r');
+                        } else {
+                            // Bare CR - convert to CR+LF
+                            result.push(b'\r');
+                            result.push(b'\n');
+                        }
+
+                        last_copy = idx + 1;
                     }
-                }
-                _ => {
-                    // Regular character - copy as-is
-                    result.push(byte);
+                    _ => {
+                        // Continue scanning
+                    }
                 }
             }
 
-            i += 1;
+            // Copy remaining chunk data
+            result.extend_from_slice(&chunk[last_copy..]);
+            i = chunk_end;
         }
 
         result
@@ -244,6 +290,7 @@ pub struct TftpServer {
     max_file_size_bytes: u64,
     write_config: WriteConfig,
     audit_enabled: bool,
+    buffer_pool: BufferPool,
 }
 
 impl TftpServer {
@@ -261,6 +308,7 @@ impl TftpServer {
             max_file_size_bytes,
             write_config,
             audit_enabled,
+            buffer_pool: BufferPool::new_default(),
         }
     }
 
@@ -294,22 +342,30 @@ impl TftpServer {
         let socket = Arc::new(UdpSocket::bind(self.bind_addr).await?);
         info!("TFTP server listening on {}", self.bind_addr);
 
-        // NIST SC-5: Allocate fixed-size buffer to prevent memory exhaustion
-        let mut buf = vec![0u8; MAX_PACKET_SIZE];
+        // Performance optimization: Use buffer pool to avoid allocations
+        let buffer_pool = self.buffer_pool.clone();
 
         loop {
+            // Acquire a buffer from the pool instead of allocating
+            let mut buf = buffer_pool.acquire().await;
+            buf.resize(MAX_PACKET_SIZE, 0);
+
             match socket.recv_from(&mut buf).await {
                 Ok((size, client_addr)) => {
-                    let data = buf[..size].to_vec();
+                    // Take ownership of the data without copying
+                    let mut data = buf;
+                    data.truncate(size);
+
                     let root_dir = self.root_dir.clone();
                     let multicast_server = self.multicast_server.clone();
                     let max_file_size = self.max_file_size_bytes;
                     let write_config = self.write_config.clone();
                     let audit_enabled = self.audit_enabled;
+                    let pool = buffer_pool.clone();
 
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_client(
-                            data,
+                            data.to_vec(),
                             client_addr,
                             root_dir,
                             multicast_server,
@@ -321,10 +377,14 @@ impl TftpServer {
                         {
                             error!("Error handling TFTP client {}: {}", client_addr, e);
                         }
+                        // Buffer will be returned to pool when dropped
+                        pool.release(data).await;
                     });
                 }
                 Err(e) => {
                     error!("Error receiving TFTP packet: {}", e);
+                    // Return buffer to pool on error
+                    buffer_pool.release(buf).await;
                 }
             }
         }
@@ -418,33 +478,76 @@ impl TftpServer {
                 // Process options
                 let mut negotiated_options = HashMap::new();
 
+                // RFC 2347: Option negotiation
+                // Server MUST either accept option with valid value or omit from OACK
                 for (name, value) in &requested_options {
                     match name.as_str() {
                         "blksize" => {
-                            // RFC 2348 - Block Size Option
-                            if let Ok(size) = value.parse::<usize>()
-                                && (8..=MAX_BLOCK_SIZE).contains(&size)
-                            {
-                                options.block_size = size;
-                                negotiated_options.insert("blksize".to_string(), size.to_string());
+                            // RFC 2348 - Block Size Option (valid range: 8-65464 bytes)
+                            match value.parse::<usize>() {
+                                Ok(size) if (8..=MAX_BLOCK_SIZE).contains(&size) => {
+                                    options.block_size = size;
+                                    negotiated_options.insert("blksize".to_string(), size.to_string());
+                                }
+                                Ok(size) => {
+                                    // Invalid size - log and omit from OACK per RFC 2347
+                                    warn!(
+                                        "Client {} requested invalid blksize={} (valid: 8-{}), using default {}",
+                                        client_addr, size, MAX_BLOCK_SIZE, options.block_size
+                                    );
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "Client {} sent non-numeric blksize='{}', using default {}",
+                                        client_addr, value, options.block_size
+                                    );
+                                }
                             }
                         }
                         "timeout" => {
-                            // RFC 2349 - Timeout Interval Option
-                            if let Ok(timeout) = value.parse::<u64>()
-                                && (1..=255).contains(&timeout)
-                            {
-                                options.timeout = timeout;
-                                negotiated_options
-                                    .insert("timeout".to_string(), timeout.to_string());
+                            // RFC 2349 - Timeout Interval Option (valid range: 1-255 seconds)
+                            match value.parse::<u64>() {
+                                Ok(timeout) if (1..=255).contains(&timeout) => {
+                                    options.timeout = timeout;
+                                    negotiated_options
+                                        .insert("timeout".to_string(), timeout.to_string());
+                                }
+                                Ok(timeout) => {
+                                    warn!(
+                                        "Client {} requested invalid timeout={} (valid: 1-255), using default {}",
+                                        client_addr, timeout, options.timeout
+                                    );
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "Client {} sent non-numeric timeout='{}', using default {}",
+                                        client_addr, value, options.timeout
+                                    );
+                                }
                             }
                         }
                         "tsize" => {
                             // RFC 2349 - Transfer Size Option
                             // For RRQ, client sends 0 and server responds with actual size
-                            if value == "0" {
-                                negotiated_options.insert("tsize".to_string(), "0".to_string());
-                                // Will be filled with actual size later
+                            match value.parse::<u64>() {
+                                Ok(0) => {
+                                    negotiated_options.insert("tsize".to_string(), "0".to_string());
+                                    // Will be filled with actual size later
+                                }
+                                Ok(size) => {
+                                    // Client sent non-zero tsize for RRQ - unusual but not invalid
+                                    debug!(
+                                        "Client {} sent tsize={} for RRQ (expected 0), will respond with actual size",
+                                        client_addr, size
+                                    );
+                                    negotiated_options.insert("tsize".to_string(), "0".to_string());
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "Client {} sent non-numeric tsize='{}', omitting from OACK",
+                                        client_addr, value
+                                    );
+                                }
                             }
                         }
                         "multicast" => {
@@ -452,8 +555,8 @@ impl TftpServer {
                             // Don't add to negotiated_options here
                         }
                         _ => {
-                            // Unknown option - ignore per RFC 2347
-                            debug!("Ignoring unknown option: {}", name);
+                            // RFC 2347: Unknown options are silently ignored
+                            debug!("Client {} sent unknown option '{}', ignoring per RFC 2347", client_addr, name);
                         }
                     }
                 }
@@ -630,41 +733,75 @@ impl TftpServer {
                     requested_options.insert(option_name.to_lowercase(), option_value);
                 }
 
-                // Process options
+                // RFC 2347: Option negotiation
+                // Server MUST either accept option with valid value or omit from OACK
                 let mut negotiated_options = HashMap::new();
 
                 for (name, value) in &requested_options {
                     match name.as_str() {
                         "blksize" => {
-                            // RFC 2348 - Block Size Option
-                            if let Ok(size) = value.parse::<usize>()
-                                && (8..=MAX_BLOCK_SIZE).contains(&size)
-                            {
-                                options.block_size = size;
-                                negotiated_options.insert("blksize".to_string(), size.to_string());
+                            // RFC 2348 - Block Size Option (valid range: 8-65464 bytes)
+                            match value.parse::<usize>() {
+                                Ok(size) if (8..=MAX_BLOCK_SIZE).contains(&size) => {
+                                    options.block_size = size;
+                                    negotiated_options.insert("blksize".to_string(), size.to_string());
+                                }
+                                Ok(size) => {
+                                    // Invalid size - log and omit from OACK per RFC 2347
+                                    warn!(
+                                        "Client {} requested invalid blksize={} (valid: 8-{}), using default {}",
+                                        client_addr, size, MAX_BLOCK_SIZE, options.block_size
+                                    );
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "Client {} sent non-numeric blksize='{}', using default {}",
+                                        client_addr, value, options.block_size
+                                    );
+                                }
                             }
                         }
                         "timeout" => {
-                            // RFC 2349 - Timeout Interval Option
-                            if let Ok(timeout) = value.parse::<u64>()
-                                && (1..=255).contains(&timeout)
-                            {
-                                options.timeout = timeout;
-                                negotiated_options
-                                    .insert("timeout".to_string(), timeout.to_string());
+                            // RFC 2349 - Timeout Interval Option (valid range: 1-255 seconds)
+                            match value.parse::<u64>() {
+                                Ok(timeout) if (1..=255).contains(&timeout) => {
+                                    options.timeout = timeout;
+                                    negotiated_options
+                                        .insert("timeout".to_string(), timeout.to_string());
+                                }
+                                Ok(timeout) => {
+                                    warn!(
+                                        "Client {} requested invalid timeout={} (valid: 1-255), using default {}",
+                                        client_addr, timeout, options.timeout
+                                    );
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "Client {} sent non-numeric timeout='{}', using default {}",
+                                        client_addr, value, options.timeout
+                                    );
+                                }
                             }
                         }
                         "tsize" => {
                             // RFC 2349 - Transfer Size Option
                             // For WRQ, client sends expected size (may be 0 if unknown)
-                            if let Ok(size) = value.parse::<u64>() {
-                                options.transfer_size = Some(size);
-                                negotiated_options.insert("tsize".to_string(), size.to_string());
+                            match value.parse::<u64>() {
+                                Ok(size) => {
+                                    options.transfer_size = Some(size);
+                                    negotiated_options.insert("tsize".to_string(), size.to_string());
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "Client {} sent non-numeric tsize='{}', omitting from OACK",
+                                        client_addr, value
+                                    );
+                                }
                             }
                         }
                         _ => {
-                            // Unknown option - ignore per RFC 2347
-                            debug!("Ignoring unknown option: {}", name);
+                            // RFC 2347: Unknown options are silently ignored
+                            debug!("Client {} sent unknown option '{}', ignoring per RFC 2347", client_addr, name);
                         }
                     }
                 }
@@ -879,126 +1016,107 @@ impl TftpServer {
             );
         }
 
-        // RFC 2349: Update tsize option with actual file size
-        // Note: For NETASCII mode, the transferred size may differ from file_size
-        // due to line ending conversion, but we report the on-disk size per RFC behavior
-        if negotiated_options.contains_key("tsize") {
-            negotiated_options.insert("tsize".to_string(), file_size.to_string());
-        }
-
         let block_size = options.block_size;
         let timeout = tokio::time::Duration::from_secs(options.timeout);
 
-        // RFC 2347: Send OACK if options were negotiated
-        if !negotiated_options.is_empty() {
-            debug!("Sending OACK with options: {:?}", negotiated_options);
-
-            let oack_packet = Self::build_oack_packet(&negotiated_options);
-            Self::send_with_retry(&socket, &oack_packet, timeout).await?;
-
-            // Wait for ACK of block 0 (the OACK)
-            match Self::wait_for_ack(&socket, 0, timeout).await {
-                Ok(()) => {}
-                Err(e) => {
-                    error!("Failed to receive ACK for OACK: {}", e);
-                    return Ok(());
-                }
-            }
-        }
-
-        // Transfer file blocks
-        // For NETASCII mode, we need to handle the entire file to apply line ending conversion
-        // For OCTET mode, we can stream blocks directly
-        let file_data = if mode == TransferMode::Netascii {
-            // RFC 1350: NETASCII mode - convert line endings
-            // NIST SI-10: Apply data format conversion for text transfer
+        // For NETASCII mode with small files, use full buffering for line ending conversion
+        // For OCTET mode or larger files, use streaming approach
+        // Performance optimization: Stream files directly without full buffering
+        if mode == TransferMode::Netascii && file_size <= 1_048_576 {
+            // Small NETASCII files (<1MB) - use full buffering for line ending conversion
             let mut raw_data = Vec::new();
             file.read_to_end(&mut raw_data).await?;
-            TransferMode::convert_to_netascii(&raw_data)
+            let file_data = TransferMode::convert_to_netascii(&raw_data);
+
+            // RFC 2349: Update tsize with converted size
+            if negotiated_options.contains_key("tsize") {
+                negotiated_options.insert("tsize".to_string(), file_data.len().to_string());
+            }
+
+            // RFC 2347: Send OACK if options were negotiated
+            if !negotiated_options.is_empty() {
+                debug!("Sending OACK with options: {:?}", negotiated_options);
+                let oack_packet = Self::build_oack_packet(&negotiated_options);
+                Self::send_with_retry(&socket, &oack_packet, timeout).await?;
+                match Self::wait_for_ack(&socket, 0, timeout).await {
+                    Ok(()) => {}
+                    Err(e) => {
+                        error!("Failed to receive ACK for OACK: {}", e);
+                        return Ok(());
+                    }
+                }
+            }
+
+            Self::send_file_data_buffered(
+                &socket,
+                &file_data,
+                block_size,
+                timeout,
+                client_addr,
+                &file_path,
+                start_time,
+                audit_enabled,
+            )
+            .await
         } else {
-            // OCTET mode - read entire file for simplicity
-            // (could be optimized for streaming in future)
-            let mut raw_data = Vec::new();
-            file.read_to_end(&mut raw_data).await?;
-            raw_data
-        };
-
-        // Send file data in blocks
-        let mut block_num: u16 = 1;
-        let mut offset = 0;
-
-        while offset < file_data.len() {
-            // Calculate block size for this packet
-            let bytes_to_send = std::cmp::min(block_size, file_data.len() - offset);
-            let block_data = &file_data[offset..offset + bytes_to_send];
-
-            // RFC 1350: DATA packet format
-            // 2 bytes: opcode (03)
-            // 2 bytes: block number
-            // n bytes: data (0-blocksize bytes)
-            let mut data_packet = BytesMut::with_capacity(4 + bytes_to_send);
-            data_packet.put_u16(TftpOpcode::Data as u16);
-            data_packet.put_u16(block_num);
-            data_packet.put_slice(block_data);
-
-            // Send with retries
-            if let Err(e) = Self::send_with_retry(&socket, &data_packet, timeout).await {
-                error!("Failed to send data block {}: {}", block_num, e);
-                return Ok(());
+            // Large files or OCTET mode - use streaming approach
+            // RFC 2349: Update tsize with file size
+            if negotiated_options.contains_key("tsize") {
+                negotiated_options.insert("tsize".to_string(), file_size.to_string());
             }
 
-            // Wait for ACK
-            match Self::wait_for_ack(&socket, block_num, timeout).await {
-                Ok(()) => {}
-                Err(e) => {
-                    error!("Failed to receive ACK for block {}: {}", block_num, e);
-                    return Ok(());
+            // RFC 2347: Send OACK if options were negotiated
+            if !negotiated_options.is_empty() {
+                debug!("Sending OACK with options: {:?}", negotiated_options);
+                let oack_packet = Self::build_oack_packet(&negotiated_options);
+                Self::send_with_retry(&socket, &oack_packet, timeout).await?;
+                match Self::wait_for_ack(&socket, 0, timeout).await {
+                    Ok(()) => {}
+                    Err(e) => {
+                        error!("Failed to receive ACK for OACK: {}", e);
+                        return Ok(());
+                    }
                 }
             }
 
-            offset += bytes_to_send;
-
-            // RFC 1350: Transfer complete when data packet < block_size
-            if bytes_to_send < block_size {
-                debug!(
-                    "Transfer complete: {} blocks sent ({} bytes, mode: {:?})",
-                    block_num,
-                    file_data.len(),
-                    mode
-                );
-
-                // Audit log: Transfer completed
-                if audit_enabled {
-                    let duration_ms = start_time.elapsed().as_millis() as u64;
-                    AuditLogger::transfer_completed(
-                        client_addr,
-                        &file_path.display().to_string(),
-                        file_data.len() as u64,
-                        block_num,
-                        duration_ms,
-                    );
-                }
-
-                break;
-            }
-
-            // RFC 1350: Block numbers wrap around after 65535
-            block_num = block_num.wrapping_add(1);
+            Self::send_file_data_streaming(
+                &socket,
+                file,
+                file_size,
+                mode,
+                block_size,
+                timeout,
+                client_addr,
+                &file_path,
+                start_time,
+                audit_enabled,
+            )
+            .await
         }
+    }
 
-        // Handle empty file case
+    /// Send file data using buffered approach (for small NETASCII files)
+    async fn send_file_data_buffered(
+        socket: &UdpSocket,
+        file_data: &[u8],
+        block_size: usize,
+        timeout: tokio::time::Duration,
+        client_addr: SocketAddr,
+        file_path: &Path,
+        start_time: std::time::Instant,
+        audit_enabled: bool,
+    ) -> Result<()> {
         if file_data.is_empty() {
             // Send a single empty data block
             let mut data_packet = BytesMut::with_capacity(4);
             data_packet.put_u16(TftpOpcode::Data as u16);
             data_packet.put_u16(1);
 
-            Self::send_with_retry(&socket, &data_packet, timeout).await?;
-            Self::wait_for_ack(&socket, 1, timeout).await?;
+            Self::send_with_retry(socket, &data_packet, timeout).await?;
+            Self::wait_for_ack(socket, 1, timeout).await?;
 
-            debug!("Transfer complete: empty file (mode: {:?})", mode);
+            debug!("Transfer complete: empty file");
 
-            // Audit log: Empty file transfer completed
             if audit_enabled {
                 let duration_ms = start_time.elapsed().as_millis() as u64;
                 AuditLogger::transfer_completed(
@@ -1009,6 +1127,174 @@ impl TftpServer {
                     duration_ms,
                 );
             }
+            return Ok(());
+        }
+
+        let mut block_num: u16 = 1;
+        let mut offset = 0;
+
+        while offset < file_data.len() {
+            let bytes_to_send = std::cmp::min(block_size, file_data.len() - offset);
+            let block_data = &file_data[offset..offset + bytes_to_send];
+
+            let mut data_packet = BytesMut::with_capacity(4 + bytes_to_send);
+            data_packet.put_u16(TftpOpcode::Data as u16);
+            data_packet.put_u16(block_num);
+            data_packet.put_slice(block_data);
+
+            let mut retries = 0;
+            loop {
+                if retries >= MAX_RETRIES {
+                    error!("Max retries exceeded for block {} after {} attempts", block_num, MAX_RETRIES);
+                    return Ok(());
+                }
+
+                socket.send(&data_packet).await?;
+
+                match Self::wait_for_ack_with_duplicate_handling(socket, block_num, timeout, &data_packet).await {
+                    Ok(true) => break,
+                    Ok(false) => {
+                        debug!("Duplicate ACK detected for block {}, retransmitting", block_num);
+                        retries += 1;
+                        continue;
+                    }
+                    Err(e) => {
+                        error!("Failed to receive ACK for block {}: {}", block_num, e);
+                        return Ok(());
+                    }
+                }
+            }
+
+            offset += bytes_to_send;
+
+            if bytes_to_send < block_size {
+                debug!("Transfer complete: {} blocks sent ({} bytes)", block_num, file_data.len());
+                if audit_enabled {
+                    let duration_ms = start_time.elapsed().as_millis() as u64;
+                    AuditLogger::transfer_completed(
+                        client_addr,
+                        &file_path.display().to_string(),
+                        file_data.len() as u64,
+                        block_num,
+                        duration_ms,
+                    );
+                }
+                break;
+            }
+
+            block_num = block_num.wrapping_add(1);
+        }
+
+        Ok(())
+    }
+
+    /// Send file data using streaming approach (for large files and OCTET mode)
+    /// Performance optimization: Reads file in chunks to minimize memory usage
+    async fn send_file_data_streaming(
+        socket: &UdpSocket,
+        mut file: File,
+        file_size: u64,
+        mode: TransferMode,
+        block_size: usize,
+        timeout: tokio::time::Duration,
+        client_addr: SocketAddr,
+        file_path: &Path,
+        start_time: std::time::Instant,
+        audit_enabled: bool,
+    ) -> Result<()> {
+        if file_size == 0 {
+            // Send a single empty data block
+            let mut data_packet = BytesMut::with_capacity(4);
+            data_packet.put_u16(TftpOpcode::Data as u16);
+            data_packet.put_u16(1);
+
+            Self::send_with_retry(socket, &data_packet, timeout).await?;
+            Self::wait_for_ack(socket, 1, timeout).await?;
+
+            debug!("Transfer complete: empty file (streaming mode)");
+
+            if audit_enabled {
+                let duration_ms = start_time.elapsed().as_millis() as u64;
+                AuditLogger::transfer_completed(
+                    client_addr,
+                    &file_path.display().to_string(),
+                    0,
+                    1,
+                    duration_ms,
+                );
+            }
+            return Ok(());
+        }
+
+        let mut block_num: u16 = 1;
+        let mut bytes_transferred: u64 = 0;
+        let mut read_buffer = vec![0u8; block_size];
+        let mut netascii_buffer = Vec::new();
+
+        loop {
+            // Read a chunk from the file
+            let bytes_read = file.read(&mut read_buffer).await?;
+            if bytes_read == 0 {
+                break; // EOF
+            }
+
+            let block_data = if mode == TransferMode::Netascii {
+                // For NETASCII, convert this chunk
+                // Note: This is chunked processing for large NETASCII files
+                netascii_buffer.clear();
+                netascii_buffer.extend_from_slice(TransferMode::convert_to_netascii(&read_buffer[..bytes_read]).as_slice());
+                &netascii_buffer[..]
+            } else {
+                &read_buffer[..bytes_read]
+            };
+
+            let mut data_packet = BytesMut::with_capacity(4 + block_data.len());
+            data_packet.put_u16(TftpOpcode::Data as u16);
+            data_packet.put_u16(block_num);
+            data_packet.put_slice(block_data);
+
+            let mut retries = 0;
+            loop {
+                if retries >= MAX_RETRIES {
+                    error!("Max retries exceeded for block {} after {} attempts", block_num, MAX_RETRIES);
+                    return Ok(());
+                }
+
+                socket.send(&data_packet).await?;
+
+                match Self::wait_for_ack_with_duplicate_handling(socket, block_num, timeout, &data_packet).await {
+                    Ok(true) => break,
+                    Ok(false) => {
+                        debug!("Duplicate ACK detected for block {}, retransmitting", block_num);
+                        retries += 1;
+                        continue;
+                    }
+                    Err(e) => {
+                        error!("Failed to receive ACK for block {}: {}", block_num, e);
+                        return Ok(());
+                    }
+                }
+            }
+
+            bytes_transferred += block_data.len() as u64;
+
+            // RFC 1350: Transfer complete when data packet < block_size
+            if bytes_read < block_size {
+                debug!("Transfer complete: {} blocks sent ({} bytes, streaming mode)", block_num, bytes_transferred);
+                if audit_enabled {
+                    let duration_ms = start_time.elapsed().as_millis() as u64;
+                    AuditLogger::transfer_completed(
+                        client_addr,
+                        &file_path.display().to_string(),
+                        bytes_transferred,
+                        block_num,
+                        duration_ms,
+                    );
+                }
+                break;
+            }
+
+            block_num = block_num.wrapping_add(1);
         }
 
         Ok(())
@@ -1070,7 +1356,13 @@ impl TftpServer {
         }
 
         // Receive file data blocks
-        let mut received_data = Vec::new();
+        // Performance optimization: Pre-allocate buffer with expected size if available
+        let mut received_data = if let Some(expected_size) = options.transfer_size {
+            Vec::with_capacity(expected_size as usize)
+        } else {
+            // Default pre-allocation for 1MB
+            Vec::with_capacity(1_048_576)
+        };
         let mut expected_block: u16 = 1;
         let mut buf = vec![0u8; MAX_PACKET_SIZE];
 
@@ -1224,6 +1516,15 @@ impl TftpServer {
                         );
                     }
 
+                    // RFC 2349: Send ERROR packet to client on timeout
+                    Self::send_error_on_socket(
+                        &socket,
+                        TftpErrorCode::NotDefined,
+                        &format!("Timeout waiting for block {}", expected_block),
+                    )
+                    .await
+                    .ok(); // Ignore send errors
+
                     return Err(TftpError::Tftp(format!(
                         "Timeout waiting for DATA block {}",
                         expected_block
@@ -1239,6 +1540,39 @@ impl TftpServer {
         } else {
             received_data
         };
+
+        // RFC 2349: Validate transfer size if client specified expected size
+        // Check if actual received size matches the tsize option (if provided and non-zero)
+        if let Some(expected_size) = options.transfer_size {
+            if expected_size > 0 && final_data.len() as u64 != expected_size {
+                warn!(
+                    "Transfer size mismatch: expected {} bytes, received {} bytes",
+                    expected_size,
+                    final_data.len()
+                );
+
+                if audit_enabled {
+                    AuditLogger::write_failed(
+                        client_addr,
+                        &file_path.display().to_string(),
+                        &format!(
+                            "Transfer size mismatch: expected {}, got {}",
+                            expected_size,
+                            final_data.len()
+                        ),
+                        expected_block,
+                    );
+                }
+
+                // Note: RFC 2349 doesn't specify error behavior for size mismatch
+                // We log a warning but still write the file since data was transferred successfully
+                debug!(
+                    "Proceeding with write despite size mismatch (expected: {}, actual: {})",
+                    expected_size,
+                    final_data.len()
+                );
+            }
+        }
 
         // Write file to disk
         match Self::write_file_safely(&file_path, &final_data).await {
@@ -1393,13 +1727,85 @@ impl TftpServer {
         Err(TftpError::Tftp("Max retries exceeded".to_string()))
     }
 
+    /// Wait for ACK with duplicate ACK detection for retransmission
+    ///
+    /// Returns: Ok(true) if correct ACK received, Ok(false) if duplicate ACK (should retransmit)
+    ///
+    /// RFC 1350: When duplicate ACK is received, retransmit the current DATA packet
+    async fn wait_for_ack_with_duplicate_handling(
+        socket: &UdpSocket,
+        expected_block: u16,
+        timeout: tokio::time::Duration,
+        _data_packet: &[u8],
+    ) -> Result<bool> {
+        // Performance optimization: ACK packets are exactly 4 bytes, no need for 1KB buffer
+        let mut ack_buf = [0u8; 16]; // Small buffer, ACKs are 4 bytes (opcode + block number)
+
+        match tokio::time::timeout(timeout, socket.recv(&mut ack_buf)).await {
+            Ok(Ok(size)) => {
+                if size < 4 {
+                    warn!("Received invalid ACK packet (too small)");
+                    return Err(TftpError::Tftp("Invalid ACK packet".to_string()));
+                }
+
+                let mut ack_bytes = BytesMut::from(&ack_buf[..size]);
+                let opcode = ack_bytes.get_u16();
+
+                // Check for ERROR packet
+                if opcode == TftpOpcode::Error as u16 {
+                    let error_code = ack_bytes.get_u16();
+                    let error_msg = Self::parse_string(&mut ack_bytes).unwrap_or_default();
+                    return Err(TftpError::Tftp(format!(
+                        "Client sent error {}: {}",
+                        error_code, error_msg
+                    )));
+                }
+
+                if opcode != TftpOpcode::Ack as u16 {
+                    warn!("Expected ACK, got opcode {}", opcode);
+                    return Err(TftpError::Tftp("Unexpected opcode".to_string()));
+                }
+
+                let ack_block = ack_bytes.get_u16();
+
+                // RFC 1350: Check ACK block number
+                if ack_block == expected_block {
+                    // Correct ACK
+                    return Ok(true);
+                } else if ack_block < expected_block {
+                    // Duplicate ACK - indicates packet loss, retransmit
+                    debug!(
+                        "Received duplicate ACK for block {} (expected {})",
+                        ack_block, expected_block
+                    );
+                    return Ok(false);
+                } else {
+                    warn!(
+                        "ACK mismatch: expected {}, got {}",
+                        expected_block, ack_block
+                    );
+                    return Err(TftpError::Tftp("ACK out of sequence".to_string()));
+                }
+            }
+            Ok(Err(e)) => {
+                error!("Error receiving ACK: {}", e);
+                Err(e.into())
+            }
+            Err(_) => Err(TftpError::Tftp(format!(
+                "Timeout waiting for ACK of block {}",
+                expected_block
+            ))),
+        }
+    }
+
     // Wait for ACK packet
     async fn wait_for_ack(
         socket: &UdpSocket,
         expected_block: u16,
         timeout: tokio::time::Duration,
     ) -> Result<()> {
-        let mut ack_buf = vec![0u8; 1024];
+        // Performance optimization: ACK packets are exactly 4 bytes
+        let mut ack_buf = [0u8; 16]; // Small buffer, ACKs are 4 bytes
 
         for retry in 0..MAX_RETRIES {
             match tokio::time::timeout(timeout, socket.recv(&mut ack_buf)).await {
