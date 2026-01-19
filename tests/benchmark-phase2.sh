@@ -12,6 +12,30 @@ YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
+# Platform detection and warning
+PLATFORM=$(uname -s)
+if [ "$PLATFORM" = "Darwin" ]; then
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo -e "${YELLOW}  ⚠️  WARNING: Running on macOS (Darwin)${NC}"
+    echo -e "${YELLOW}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
+    echo ""
+    echo -e "${YELLOW}Phase 2 batch operations (recvmmsg/sendmmsg) are NOT supported on macOS.${NC}"
+    echo -e "${YELLOW}The server will use fallback to single recv_from() calls.${NC}"
+    echo ""
+    echo -e "${RED}Expected results:${NC}"
+    echo -e "  ❌ No performance improvement (both configs use same code path)"
+    echo -e "  ❌ No syscall reduction (strace not available)"
+    echo -e "  ❌ Benchmark results will show ~0% improvement"
+    echo ""
+    echo -e "${GREEN}To measure actual Phase 2 performance gains, run on:${NC}"
+    echo -e "  ✓ Linux (kernel 2.6.33+)"
+    echo -e "  ✓ FreeBSD 11.0+"
+    echo ""
+    echo -e "Press Enter to continue anyway (for testing), or Ctrl+C to exit..."
+    read -r
+    echo ""
+fi
+
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
@@ -232,7 +256,12 @@ start_server() {
     print_info "Starting server with config: $config_file"
 
     # Create log directory if it doesn't exist (for default logging.file path)
-    mkdir -p /var/log/snow-owl 2>/dev/null || true
+    # Try with sudo if available and we're not already root
+    if command -v sudo &> /dev/null && [ "$EUID" -ne 0 ]; then
+        sudo mkdir -p /var/log/snow-owl 2>/dev/null || true
+    else
+        mkdir -p /var/log/snow-owl 2>/dev/null || true
+    fi
 
     # Kill any existing server
     if [ -f "$pid_file" ]; then
