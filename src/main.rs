@@ -22,6 +22,7 @@ use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 // Phase 2: Batch operations and zero-copy transfers
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
@@ -552,13 +553,14 @@ impl TransferMode {
     }
 }
 
-// RFC 2347/2348/2349 - TFTP Options
+// RFC 2347/2348/2349/7440 - TFTP Options
 #[derive(Debug, Clone)]
 pub(crate) struct TftpOptions {
     pub block_size: usize, // RFC 2348 - Block Size Option
     pub timeout: u64,      // RFC 2349 - Timeout Interval Option
     #[allow(dead_code)]
     pub transfer_size: Option<u64>, // RFC 2349 - Transfer Size Option
+    pub windowsize: usize, // RFC 7440 - Windowsize Option (1-65535 blocks)
 }
 
 impl Default for TftpOptions {
@@ -567,6 +569,7 @@ impl Default for TftpOptions {
             block_size: DEFAULT_BLOCK_SIZE,
             timeout: DEFAULT_TIMEOUT_SECS,
             transfer_size: None,
+            windowsize: 1, // RFC 7440: windowsize=1 equals RFC 1350 behavior
         }
     }
 }
@@ -580,6 +583,7 @@ pub struct TftpServer {
     audit_enabled: bool,
     buffer_pool: BufferPool,
     config: Arc<TftpConfig>,
+    active_clients: Arc<AtomicUsize>,
 }
 
 impl TftpServer {
@@ -600,6 +604,7 @@ impl TftpServer {
             audit_enabled,
             buffer_pool: BufferPool::new_default(),
             config,
+            active_clients: Arc::new(AtomicUsize::new(0)),
         }
     }
 
@@ -639,21 +644,49 @@ impl TftpServer {
 
         // Performance optimization: Use buffer pool to avoid allocations
         let buffer_pool = self.buffer_pool.clone();
+        let active_clients = self.active_clients.clone();
 
-        // Phase 2: Use batch receiving if enabled
+        // Phase 2: Batch receiving configuration
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-        let use_batch_recv = self.config.performance.platform.batch.enable_recvmmsg;
+        let batch_config = &self.config.performance.platform.batch;
         #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-        let batch_size = self.config.performance.platform.batch.max_batch_size;
+        let batch_size = batch_config.max_batch_size;
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        let adaptive_batching_enabled = batch_config.enable_adaptive_batching;
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        let adaptive_threshold = batch_config.adaptive_batch_threshold;
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        let base_batch_enabled = batch_config.enable_recvmmsg;
 
         #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
-        let use_batch_recv = false;
+        let adaptive_batching_enabled = false;
 
-        if use_batch_recv {
-            info!("Using recvmmsg() batch receiving (Phase 2 optimization)");
+        if adaptive_batching_enabled {
+            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            info!(
+                "Adaptive batching enabled: batch receiving will be used when active clients >= {}",
+                adaptive_threshold
+            );
+        } else {
+            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            if base_batch_enabled {
+                info!("Using recvmmsg() batch receiving (Phase 2 optimization)");
+            }
         }
 
         loop {
+            // Phase 2: Adaptive batching - decide whether to use batch receiving
+            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            let use_batch_recv = if adaptive_batching_enabled {
+                let current_clients = active_clients.load(Ordering::Relaxed);
+                current_clients >= adaptive_threshold && base_batch_enabled
+            } else {
+                base_batch_enabled
+            };
+
+            #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+            let use_batch_recv = false;
+
             // Phase 2: Try batch receive first on supported platforms
             #[cfg(any(target_os = "linux", target_os = "freebsd"))]
             if use_batch_recv {
@@ -678,6 +711,10 @@ impl TftpServer {
                             let file_io_config = self.config.performance.platform.file_io.clone();
                             let pool = buffer_pool.clone();
                             let addr = *client_addr;
+                            let client_counter = active_clients.clone();
+
+                            // Increment active clients counter
+                            client_counter.fetch_add(1, Ordering::Relaxed);
 
                             tokio::spawn(async move {
                                 if let Err(e) = Self::handle_client(
@@ -695,6 +732,9 @@ impl TftpServer {
                                     error!("Error handling TFTP client {}: {}", addr, e);
                                 }
                                 pool.release(buf).await;
+
+                                // Decrement active clients counter when done
+                                client_counter.fetch_sub(1, Ordering::Relaxed);
                             });
                         }
                         continue;
@@ -725,6 +765,10 @@ impl TftpServer {
                     let audit_enabled = self.audit_enabled;
                     let file_io_config = self.config.performance.platform.file_io.clone();
                     let pool = buffer_pool.clone();
+                    let client_counter = active_clients.clone();
+
+                    // Increment active clients counter
+                    client_counter.fetch_add(1, Ordering::Relaxed);
 
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_client(
@@ -743,6 +787,9 @@ impl TftpServer {
                         }
                         // Buffer will be returned to pool when dropped
                         pool.release(data).await;
+
+                        // Decrement active clients counter when done
+                        client_counter.fetch_sub(1, Ordering::Relaxed);
                     });
                 }
                 Err(e) => {
@@ -913,6 +960,30 @@ impl TftpServer {
                                     warn!(
                                         "Client {} sent non-numeric tsize='{}', omitting from OACK",
                                         client_addr, value
+                                    );
+                                }
+                            }
+                        }
+                        "windowsize" => {
+                            // RFC 7440 - Windowsize Option (valid range: 1-65535 blocks)
+                            match value.parse::<usize>() {
+                                Ok(size) if (1..=65535).contains(&size) => {
+                                    // Server can accept or negotiate down
+                                    // For now, accept client's windowsize if valid
+                                    options.windowsize = size;
+                                    negotiated_options
+                                        .insert("windowsize".to_string(), size.to_string());
+                                }
+                                Ok(size) => {
+                                    warn!(
+                                        "Client {} requested invalid windowsize={} (valid: 1-65535), using default {}",
+                                        client_addr, size, options.windowsize
+                                    );
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "Client {} sent non-numeric windowsize='{}', using default {}",
+                                        client_addr, value, options.windowsize
                                     );
                                 }
                             }
@@ -1168,6 +1239,30 @@ impl TftpServer {
                                     warn!(
                                         "Client {} sent non-numeric tsize='{}', omitting from OACK",
                                         client_addr, value
+                                    );
+                                }
+                            }
+                        }
+                        "windowsize" => {
+                            // RFC 7440 - Windowsize Option (valid range: 1-65535 blocks)
+                            match value.parse::<usize>() {
+                                Ok(size) if (1..=65535).contains(&size) => {
+                                    // Server can accept or negotiate down
+                                    // For now, accept client's windowsize if valid
+                                    options.windowsize = size;
+                                    negotiated_options
+                                        .insert("windowsize".to_string(), size.to_string());
+                                }
+                                Ok(size) => {
+                                    warn!(
+                                        "Client {} requested invalid windowsize={} (valid: 1-65535), using default {}",
+                                        client_addr, size, options.windowsize
+                                    );
+                                }
+                                Err(_) => {
+                                    warn!(
+                                        "Client {} sent non-numeric windowsize='{}', using default {}",
+                                        client_addr, value, options.windowsize
                                     );
                                 }
                             }
@@ -1432,6 +1527,7 @@ impl TftpServer {
                 &socket,
                 &file_data,
                 block_size,
+                options.windowsize,
                 timeout,
                 client_addr,
                 &file_path,
@@ -1466,6 +1562,7 @@ impl TftpServer {
                 file_size,
                 mode,
                 block_size,
+                options.windowsize,
                 timeout,
                 client_addr,
                 &file_path,
@@ -1477,11 +1574,13 @@ impl TftpServer {
     }
 
     /// Send file data using buffered approach (for small NETASCII files)
+    /// RFC 7440: Supports windowsize for sending multiple blocks before ACK
     #[allow(clippy::too_many_arguments)]
     async fn send_file_data_buffered(
         socket: &UdpSocket,
         file_data: &[u8],
         block_size: usize,
+        windowsize: usize,
         timeout: tokio::time::Duration,
         client_addr: SocketAddr,
         file_path: &Path,
@@ -1515,73 +1614,109 @@ impl TftpServer {
         let mut block_num: u16 = 1;
         let mut offset = 0;
 
+        // RFC 7440: Sliding window transmission
+        // Send windowsize blocks, then wait for ACK of the last block
         while offset < file_data.len() {
-            let bytes_to_send = std::cmp::min(block_size, file_data.len() - offset);
-            let block_data = &file_data[offset..offset + bytes_to_send];
+            let window_start_block = block_num;
+            let mut window_packets = Vec::with_capacity(windowsize);
+            let mut blocks_in_window = 0;
+            let mut temp_offset = offset;
+            let mut temp_block_num = block_num;
 
-            let mut data_packet = BytesMut::with_capacity(4 + bytes_to_send);
-            data_packet.put_u16(TftpOpcode::Data as u16);
-            data_packet.put_u16(block_num);
-            data_packet.put_slice(block_data);
+            // Build a window of packets
+            while blocks_in_window < windowsize && temp_offset < file_data.len() {
+                let bytes_to_send = std::cmp::min(block_size, file_data.len() - temp_offset);
+                let block_data = &file_data[temp_offset..temp_offset + bytes_to_send];
 
+                let mut data_packet = BytesMut::with_capacity(4 + bytes_to_send);
+                data_packet.put_u16(TftpOpcode::Data as u16);
+                data_packet.put_u16(temp_block_num);
+                data_packet.put_slice(block_data);
+
+                window_packets.push((temp_block_num, data_packet.freeze(), bytes_to_send));
+
+                temp_offset += bytes_to_send;
+                temp_block_num = temp_block_num.wrapping_add(1);
+                blocks_in_window += 1;
+
+                // Stop if this is the last block (less than block_size)
+                if bytes_to_send < block_size {
+                    break;
+                }
+            }
+
+            // Send all blocks in the window
             let mut retries = 0;
+            let last_block_in_window = window_packets.last().unwrap().0;
+
             loop {
                 if retries >= MAX_RETRIES {
                     error!(
-                        "Max retries exceeded for block {} after {} attempts",
-                        block_num, MAX_RETRIES
+                        "Max retries exceeded for window starting at block {} after {} attempts",
+                        window_start_block, MAX_RETRIES
                     );
                     return Ok(());
                 }
 
-                socket.send(&data_packet).await?;
+                // Send all packets in window
+                for (_, packet, _) in &window_packets {
+                    socket.send(packet).await?;
+                }
 
+                // RFC 7440: Wait for ACK of the last block in the window
                 match Self::wait_for_ack_with_duplicate_handling(
                     socket,
-                    block_num,
+                    last_block_in_window,
                     timeout,
-                    &data_packet,
+                    &window_packets.last().unwrap().1,
                 )
                 .await
                 {
                     Ok(true) => break,
                     Ok(false) => {
                         debug!(
-                            "Duplicate ACK detected for block {}, retransmitting",
-                            block_num
+                            "Duplicate or out-of-order ACK for window ending at block {}, retransmitting window",
+                            last_block_in_window
                         );
                         retries += 1;
                         continue;
                     }
                     Err(e) => {
-                        error!("Failed to receive ACK for block {}: {}", block_num, e);
-                        return Ok(());
+                        debug!(
+                            "Timeout or error waiting for ACK of block {}: {}, retransmitting window",
+                            last_block_in_window, e
+                        );
+                        retries += 1;
+                        continue;
                     }
                 }
             }
 
-            offset += bytes_to_send;
+            // Move forward by the number of blocks sent
+            for (blk_num, _, bytes_sent) in &window_packets {
+                offset += bytes_sent;
+                block_num = blk_num.wrapping_add(1);
 
-            if bytes_to_send < block_size {
-                debug!(
-                    "Transfer complete: {} blocks sent ({} bytes)",
-                    block_num,
-                    file_data.len()
-                );
-                if audit_enabled {
-                    let duration_ms = start_time.elapsed().as_millis() as u64;
-                    AuditLogger::transfer_completed(
-                        client_addr,
-                        &file_path.display().to_string(),
-                        file_data.len() as u64,
-                        block_num,
-                        duration_ms,
+                // Check if this was the final block
+                if *bytes_sent < block_size {
+                    debug!(
+                        "Transfer complete: {} blocks sent ({} bytes)",
+                        blk_num,
+                        file_data.len()
                     );
+                    if audit_enabled {
+                        let duration_ms = start_time.elapsed().as_millis() as u64;
+                        AuditLogger::transfer_completed(
+                            client_addr,
+                            &file_path.display().to_string(),
+                            file_data.len() as u64,
+                            *blk_num,
+                            duration_ms,
+                        );
+                    }
+                    return Ok(());
                 }
-                break;
             }
-
-            block_num = block_num.wrapping_add(1);
         }
 
         Ok(())
@@ -1590,12 +1725,16 @@ impl TftpServer {
     /// Send file data using streaming approach (for large files and OCTET mode)
     /// Performance optimization: Reads file in chunks to minimize memory usage
     #[allow(clippy::too_many_arguments)]
+    /// Send file data using streaming approach (for large files and OCTET mode)
+    /// RFC 7440: Supports windowsize for sending multiple blocks before ACK
+    #[allow(clippy::too_many_arguments)]
     async fn send_file_data_streaming(
         socket: &UdpSocket,
         mut file: File,
         file_size: u64,
         mode: TransferMode,
         block_size: usize,
+        windowsize: usize,
         timeout: tokio::time::Duration,
         client_addr: SocketAddr,
         file_path: &Path,
@@ -1630,93 +1769,129 @@ impl TftpServer {
         let mut bytes_transferred: u64 = 0;
         let mut read_buffer = vec![0u8; block_size];
         let mut netascii_buffer = Vec::new();
+        let mut eof_reached = false;
 
+        // RFC 7440: Sliding window transmission for streaming
         loop {
-            // Read a chunk from the file
-            let bytes_read = file.read(&mut read_buffer).await?;
+            let mut window_packets = Vec::with_capacity(windowsize);
+            let mut blocks_in_window = 0;
+            let window_start_block = block_num;
 
-            // Determine block data based on mode
-            let block_data = if bytes_read > 0 {
-                if mode == TransferMode::Netascii {
-                    // For NETASCII, convert this chunk
-                    // Note: This is chunked processing for large NETASCII files
+            // Build a window of packets by reading from file
+            while blocks_in_window < windowsize && !eof_reached {
+                let bytes_read = file.read(&mut read_buffer).await?;
+
+                if bytes_read == 0 {
+                    eof_reached = true;
+                    break;
+                }
+
+                // Determine block data based on mode
+                let block_data = if mode == TransferMode::Netascii {
                     netascii_buffer.clear();
                     netascii_buffer.extend_from_slice(
                         TransferMode::convert_to_netascii(&read_buffer[..bytes_read]).as_slice(),
                     );
-                    &netascii_buffer[..]
+                    netascii_buffer.clone()
                 } else {
-                    &read_buffer[..bytes_read]
+                    read_buffer[..bytes_read].to_vec()
+                };
+
+                let mut data_packet = BytesMut::with_capacity(4 + block_data.len());
+                data_packet.put_u16(TftpOpcode::Data as u16);
+                data_packet.put_u16(block_num);
+                data_packet.put_slice(&block_data);
+
+                let is_final = bytes_read < block_size;
+                window_packets.push((block_num, data_packet.freeze(), block_data.len(), is_final));
+
+                block_num = block_num.wrapping_add(1);
+                blocks_in_window += 1;
+
+                if is_final {
+                    eof_reached = true;
+                    break;
                 }
-            } else {
-                // EOF reached - send empty data to signal completion (RFC 1350)
-                &[]
-            };
+            }
 
-            let mut data_packet = BytesMut::with_capacity(4 + block_data.len());
-            data_packet.put_u16(TftpOpcode::Data as u16);
-            data_packet.put_u16(block_num);
-            data_packet.put_slice(block_data);
+            // If no packets in window, we're done
+            if window_packets.is_empty() {
+                break;
+            }
 
+            // Send all blocks in the window with retry
             let mut retries = 0;
+            let last_block_in_window = window_packets.last().unwrap().0;
+
             loop {
                 if retries >= MAX_RETRIES {
                     error!(
-                        "Max retries exceeded for block {} after {} attempts",
-                        block_num, MAX_RETRIES
+                        "Max retries exceeded for window starting at block {} after {} attempts",
+                        window_start_block, MAX_RETRIES
                     );
                     return Ok(());
                 }
 
-                socket.send(&data_packet).await?;
+                // Send all packets in window
+                for (_, packet, _, _) in &window_packets {
+                    socket.send(packet).await?;
+                }
 
+                // RFC 7440: Wait for ACK of the last block in the window
                 match Self::wait_for_ack_with_duplicate_handling(
                     socket,
-                    block_num,
+                    last_block_in_window,
                     timeout,
-                    &data_packet,
+                    &window_packets.last().unwrap().1,
                 )
                 .await
                 {
                     Ok(true) => break,
                     Ok(false) => {
                         debug!(
-                            "Duplicate ACK detected for block {}, retransmitting",
-                            block_num
+                            "Duplicate or out-of-order ACK for window ending at block {}, retransmitting window",
+                            last_block_in_window
                         );
                         retries += 1;
                         continue;
                     }
                     Err(e) => {
-                        error!("Failed to receive ACK for block {}: {}", block_num, e);
-                        return Ok(());
+                        debug!(
+                            "Timeout waiting for ACK of block {}: {}, retransmitting window",
+                            last_block_in_window, e
+                        );
+                        retries += 1;
+                        continue;
                     }
                 }
             }
 
-            bytes_transferred += block_data.len() as u64;
+            // Update bytes transferred and check for completion
+            for (blk_num, _, bytes_sent, is_final) in &window_packets {
+                bytes_transferred += *bytes_sent as u64;
 
-            // RFC 1350: Transfer complete when we send a packet < block_size
-            // This includes the case where file size is exact multiple of block_size
-            if bytes_read < block_size {
-                debug!(
-                    "Transfer complete: {} blocks sent ({} bytes, streaming mode)",
-                    block_num, bytes_transferred
-                );
-                if audit_enabled {
-                    let duration_ms = start_time.elapsed().as_millis() as u64;
-                    AuditLogger::transfer_completed(
-                        client_addr,
-                        &file_path.display().to_string(),
-                        bytes_transferred,
-                        block_num,
-                        duration_ms,
+                if *is_final {
+                    debug!(
+                        "Transfer complete: {} blocks sent ({} bytes, streaming mode)",
+                        blk_num, bytes_transferred
                     );
+                    if audit_enabled {
+                        let duration_ms = start_time.elapsed().as_millis() as u64;
+                        AuditLogger::transfer_completed(
+                            client_addr,
+                            &file_path.display().to_string(),
+                            bytes_transferred,
+                            *blk_num,
+                            duration_ms,
+                        );
+                    }
+                    return Ok(());
                 }
-                break;
             }
 
-            block_num = block_num.wrapping_add(1);
+            if eof_reached {
+                break;
+            }
         }
 
         Ok(())
@@ -1762,6 +1937,7 @@ impl TftpServer {
         }
 
         let block_size = options.block_size;
+        let windowsize = options.windowsize;
         let timeout = tokio::time::Duration::from_secs(options.timeout);
 
         // RFC 2347: Send OACK if options were negotiated, or ACK block 0 to begin transfer
@@ -1888,21 +2064,38 @@ impl TftpServer {
                     // Append data to buffer
                     received_data.extend_from_slice(block_data);
 
-                    // Send ACK
-                    let mut ack_packet = BytesMut::with_capacity(4);
-                    ack_packet.put_u16(TftpOpcode::Ack as u16);
-                    ack_packet.put_u16(block_num);
-                    socket.send(&ack_packet).await?;
+                    // RFC 7440: Only send ACK when we've received:
+                    // 1. The last block in a window, OR
+                    // 2. The final block (< block_size)
+                    let is_final_block = data_len < block_size;
+                    let blocks_in_current_window = (block_num - 1) % windowsize as u16 + 1;
+                    let should_ack =
+                        blocks_in_current_window == windowsize as u16 || is_final_block;
 
-                    debug!(
-                        "Received block {} ({} bytes, total: {} bytes)",
-                        block_num,
-                        data_len,
-                        received_data.len()
-                    );
+                    if should_ack {
+                        // Send ACK for the last block in window
+                        let mut ack_packet = BytesMut::with_capacity(4);
+                        ack_packet.put_u16(TftpOpcode::Ack as u16);
+                        ack_packet.put_u16(block_num);
+                        socket.send(&ack_packet).await?;
+
+                        debug!(
+                            "Received block {} (ACK sent, {} bytes, total: {} bytes)",
+                            block_num,
+                            data_len,
+                            received_data.len()
+                        );
+                    } else {
+                        debug!(
+                            "Received block {} (buffered in window, {} bytes, total: {} bytes)",
+                            block_num,
+                            data_len,
+                            received_data.len()
+                        );
+                    }
 
                     // RFC 1350: Transfer complete when data packet < block_size
-                    if data_len < block_size {
+                    if is_final_block {
                         info!(
                             "Write complete: {} blocks received ({} bytes)",
                             block_num,

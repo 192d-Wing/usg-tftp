@@ -575,6 +575,12 @@ pub struct PerformanceConfig {
     /// Valid range: 512-65464
     pub default_block_size: usize,
 
+    /// Default window size for RFC 7440 sliding window (blocks)
+    /// RFC 7440: Valid range 1-65535, default 1 for RFC 1350 compatibility
+    /// Higher values improve throughput on high-latency networks
+    /// Recommended: 4-16 for typical networks, 32+ for high-latency links
+    pub default_windowsize: usize,
+
     /// Buffer pool size for packet reuse
     /// Larger pools reduce allocations but use more memory
     pub buffer_pool_size: usize,
@@ -597,6 +603,7 @@ impl Default for PerformanceConfig {
     fn default() -> Self {
         Self {
             default_block_size: 8192, // 8KB for better throughput
+            default_windowsize: 1,    // RFC 1350 compatible (stop-and-wait)
             buffer_pool_size: 128,
             streaming_threshold: 1_048_576, // 1MB
             audit_sampling_rate: 1.0,       // Log everything by default
@@ -715,6 +722,18 @@ pub struct BatchConfig {
     /// Lower values reduce latency, higher values improve batching efficiency
     /// Default: 100 microseconds
     pub batch_timeout_us: u64,
+
+    /// Enable adaptive batching based on active client count
+    /// When enabled, batch receiving is automatically disabled for low client counts
+    /// to eliminate single-client latency regression
+    /// Default: true
+    pub enable_adaptive_batching: bool,
+
+    /// Minimum number of active clients required to enable batch receiving
+    /// When active clients < threshold, batch receiving is disabled for lower latency
+    /// When active clients >= threshold, batch receiving is enabled for better throughput
+    /// Default: 5 clients
+    pub adaptive_batch_threshold: usize,
 }
 
 impl Default for BatchConfig {
@@ -731,6 +750,8 @@ impl Default for BatchConfig {
             enable_recvmmsg: default_enabled,
             max_batch_size: 32,
             batch_timeout_us: 100,
+            enable_adaptive_batching: true,
+            adaptive_batch_threshold: 5,
         }
     }
 }
@@ -771,8 +792,8 @@ impl Default for ZeroCopyConfig {
 
         Self {
             use_sendfile: default_sendfile,
-            sendfile_threshold_bytes: 65536, // 64 KB
-            use_msg_zerocopy: false, // Experimental, requires completion handling
+            sendfile_threshold_bytes: 65536,    // 64 KB
+            use_msg_zerocopy: false,            // Experimental, requires completion handling
             msg_zerocopy_threshold_bytes: 8192, // 8 KB
         }
     }
