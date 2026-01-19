@@ -1,0 +1,407 @@
+{
+  "alerts": [
+    {
+      "name": "TFTP Path Traversal Attempt",
+      "type": "query",
+      "enabled": true,
+      "schedule": {
+        "interval": "5m"
+      },
+      "query": {
+        "index": "tftp-audit-*",
+        "filter": {
+          "term": {
+            "event_type.keyword": "path_traversal_attempt"
+          }
+        },
+        "timeWindow": "5m"
+      },
+      "threshold": {
+        "value": 0,
+        "comparator": "greater than"
+      },
+      "actions": [
+        {
+          "id": "email",
+          "params": {
+            "to": ["security-team@example.com"],
+            "subject": "CRITICAL: TFTP Path Traversal Attempt",
+            "message": "Path traversal attempt detected from {{context.client_addr}} accessing {{context.requested_path}}"
+          }
+        },
+        {
+          "id": "webhook",
+          "params": {
+            "method": "POST",
+            "url": "https://your-webhook-url.com/alerts",
+            "headers": {
+              "Content-Type": "application/json"
+            },
+            "body": "{\"alert\":\"path_traversal\",\"severity\":\"critical\",\"client\":\"{{context.client_addr}}\",\"path\":\"{{context.requested_path}}\"}"
+          }
+        }
+      ],
+      "severity": "critical",
+      "tags": ["security", "tftp", "critical"]
+    },
+    {
+      "name": "TFTP High Transfer Failure Rate",
+      "type": "query",
+      "enabled": true,
+      "schedule": {
+        "interval": "10m"
+      },
+      "query": {
+        "index": "tftp-audit-*",
+        "aggregations": {
+          "transfers": {
+            "terms": {
+              "field": "event_type.keyword"
+            }
+          }
+        },
+        "timeWindow": "10m"
+      },
+      "threshold": {
+        "value": 0.1,
+        "comparator": "greater than",
+        "script": "ctx.results[0].aggregations.transfers.buckets.find(b => b.key == 'transfer_failed').doc_count / ctx.results[0].hits.total.value"
+      },
+      "actions": [
+        {
+          "id": "email",
+          "params": {
+            "to": ["ops-team@example.com"],
+            "subject": "WARNING: High TFTP Transfer Failure Rate",
+            "message": "Transfer failure rate exceeds 10% in the last 10 minutes"
+          }
+        }
+      ],
+      "severity": "warning",
+      "tags": ["performance", "tftp"]
+    },
+    {
+      "name": "TFTP Slow Transfer Speed",
+      "type": "query",
+      "enabled": true,
+      "schedule": {
+        "interval": "15m"
+      },
+      "query": {
+        "index": "tftp-audit-*",
+        "filter": {
+          "term": {
+            "event_type.keyword": "transfer_completed"
+          }
+        },
+        "aggregations": {
+          "avg_throughput": {
+            "avg": {
+              "field": "throughput_bps"
+            }
+          }
+        },
+        "timeWindow": "15m"
+      },
+      "threshold": {
+        "value": 102400,
+        "comparator": "less than",
+        "field": "avg_throughput"
+      },
+      "actions": [
+        {
+          "id": "email",
+          "params": {
+            "to": ["ops-team@example.com"],
+            "subject": "WARNING: Slow TFTP Transfer Speeds",
+            "message": "Average transfer speed is below 100 KB/s"
+          }
+        }
+      ],
+      "severity": "warning",
+      "tags": ["performance", "tftp"]
+    },
+    {
+      "name": "TFTP Repeated Access Denials",
+      "type": "query",
+      "enabled": true,
+      "schedule": {
+        "interval": "5m"
+      },
+      "query": {
+        "index": "tftp-audit-*",
+        "filter": {
+          "term": {
+            "event_type.keyword": "read_denied"
+          }
+        },
+        "aggregations": {
+          "by_client": {
+            "terms": {
+              "field": "client_addr.keyword",
+              "size": 100
+            }
+          }
+        },
+        "timeWindow": "5m"
+      },
+      "threshold": {
+        "value": 10,
+        "comparator": "greater than",
+        "script": "ctx.results[0].aggregations.by_client.buckets.stream().anyMatch(b => b.doc_count > 10)"
+      },
+      "actions": [
+        {
+          "id": "email",
+          "params": {
+            "to": ["security-team@example.com"],
+            "subject": "WARNING: Repeated TFTP Access Denials",
+            "message": "Client has been denied access more than 10 times in 5 minutes"
+          }
+        },
+        {
+          "id": "index",
+          "params": {
+            "index": "tftp-security-incidents",
+            "doc": {
+              "timestamp": "{{date}}",
+              "alert_type": "repeated_access_denials",
+              "severity": "high",
+              "context": "{{context}}"
+            }
+          }
+        }
+      ],
+      "severity": "high",
+      "tags": ["security", "tftp", "access-control"]
+    },
+    {
+      "name": "TFTP Write Attempt on Read-Only Server",
+      "type": "query",
+      "enabled": true,
+      "schedule": {
+        "interval": "5m"
+      },
+      "query": {
+        "index": "tftp-audit-*",
+        "filter": {
+          "term": {
+            "event_type.keyword": "write_request_denied"
+          }
+        },
+        "timeWindow": "5m"
+      },
+      "threshold": {
+        "value": 0,
+        "comparator": "greater than"
+      },
+      "actions": [
+        {
+          "id": "email",
+          "params": {
+            "to": ["security-team@example.com"],
+            "subject": "WARNING: Write Attempt on Read-Only TFTP Server",
+            "message": "Client {{context.client_addr}} attempted to write {{context.filename}}"
+          }
+        }
+      ],
+      "severity": "high",
+      "tags": ["security", "tftp", "write-attempt"]
+    },
+    {
+      "name": "TFTP Server Restart",
+      "type": "query",
+      "enabled": true,
+      "schedule": {
+        "interval": "5m"
+      },
+      "query": {
+        "index": "tftp-audit-*",
+        "filter": {
+          "term": {
+            "event_type.keyword": "server_started"
+          }
+        },
+        "timeWindow": "5m"
+      },
+      "threshold": {
+        "value": 0,
+        "comparator": "greater than"
+      },
+      "actions": [
+        {
+          "id": "email",
+          "params": {
+            "to": ["ops-team@example.com"],
+            "subject": "INFO: TFTP Server Restarted",
+            "message": "TFTP server on {{context.hostname}} restarted at {{context.bind_addr}}"
+          }
+        },
+        {
+          "id": "slack",
+          "params": {
+            "webhook_url": "https://hooks.slack.com/services/YOUR/WEBHOOK/URL",
+            "message": "TFTP server restarted on {{context.hostname}}"
+          }
+        }
+      ],
+      "severity": "info",
+      "tags": ["operational", "tftp"]
+    },
+    {
+      "name": "TFTP No Activity",
+      "type": "query",
+      "enabled": true,
+      "schedule": {
+        "interval": "30m"
+      },
+      "query": {
+        "index": "tftp-audit-*",
+        "timeWindow": "30m"
+      },
+      "threshold": {
+        "value": 0,
+        "comparator": "equal to",
+        "field": "hits.total.value"
+      },
+      "actions": [
+        {
+          "id": "email",
+          "params": {
+            "to": ["ops-team@example.com"],
+            "subject": "WARNING: No TFTP Activity Detected",
+            "message": "No TFTP events logged in the last 30 minutes"
+          }
+        }
+      ],
+      "severity": "warning",
+      "tags": ["operational", "tftp", "availability"]
+    },
+    {
+      "name": "TFTP Multicast Client Timeouts",
+      "type": "query",
+      "enabled": true,
+      "schedule": {
+        "interval": "10m"
+      },
+      "query": {
+        "index": "tftp-audit-*",
+        "filter": {
+          "bool": {
+            "must": [
+              {
+                "term": {
+                  "event_type.keyword": "multicast_client_removed"
+                }
+              },
+              {
+                "term": {
+                  "reason.keyword": "timeout"
+                }
+              }
+            ]
+          }
+        },
+        "aggregations": {
+          "by_session": {
+            "terms": {
+              "field": "session_id.keyword"
+            }
+          }
+        },
+        "timeWindow": "10m"
+      },
+      "threshold": {
+        "value": 5,
+        "comparator": "greater than",
+        "script": "ctx.results[0].aggregations.by_session.buckets.stream().anyMatch(b => b.doc_count > 5)"
+      },
+      "actions": [
+        {
+          "id": "email",
+          "params": {
+            "to": ["ops-team@example.com"],
+            "subject": "WARNING: High Multicast Client Timeout Rate",
+            "message": "More than 5 clients timed out in multicast session"
+          }
+        }
+      ],
+      "severity": "warning",
+      "tags": ["multicast", "tftp", "performance"]
+    },
+    {
+      "name": "TFTP Configuration Error",
+      "type": "query",
+      "enabled": true,
+      "schedule": {
+        "interval": "5m"
+      },
+      "query": {
+        "index": "tftp-audit-*",
+        "filter": {
+          "term": {
+            "event_type.keyword": "configuration_error"
+          }
+        },
+        "timeWindow": "5m"
+      },
+      "threshold": {
+        "value": 0,
+        "comparator": "greater than"
+      },
+      "actions": [
+        {
+          "id": "email",
+          "params": {
+            "to": ["ops-team@example.com"],
+            "subject": "ERROR: TFTP Configuration Error",
+            "message": "Configuration error in {{context.config_file}}: {{context.error}}"
+          }
+        },
+        {
+          "id": "pagerduty",
+          "params": {
+            "severity": "error",
+            "description": "TFTP configuration error detected"
+          }
+        }
+      ],
+      "severity": "high",
+      "tags": ["operational", "tftp", "configuration"]
+    },
+    {
+      "name": "TFTP High Request Volume",
+      "type": "query",
+      "enabled": true,
+      "schedule": {
+        "interval": "5m"
+      },
+      "query": {
+        "index": "tftp-audit-*",
+        "filter": {
+          "term": {
+            "event_type.keyword": "read_request"
+          }
+        },
+        "timeWindow": "5m"
+      },
+      "threshold": {
+        "value": 3000,
+        "comparator": "greater than",
+        "field": "hits.total.value"
+      },
+      "actions": [
+        {
+          "id": "email",
+          "params": {
+            "to": ["ops-team@example.com", "security-team@example.com"],
+            "subject": "WARNING: High TFTP Request Volume",
+            "message": "Received more than 3000 requests in the last 5 minutes - possible DoS"
+          }
+        }
+      ],
+      "severity": "warning",
+      "tags": ["security", "tftp", "dos"]
+    }
+  ]
+}
