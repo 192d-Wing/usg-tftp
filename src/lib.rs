@@ -1,23 +1,28 @@
+mod multicast;
+
 use bytes::{Buf, BufMut, BytesMut};
 use snow_owl_core::*;
 use std::collections::HashMap;
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio::net::UdpSocket;
 use tracing::{debug, error, info, warn};
 
+pub use multicast::MulticastTftpServer;
+
 // RFC 1350 - The TFTP Protocol (Revision 2)
 const TFTP_PORT: u16 = 69;
-const DEFAULT_BLOCK_SIZE: usize = 512; // RFC 1350 standard block size
+pub(crate) const DEFAULT_BLOCK_SIZE: usize = 512; // RFC 1350 standard block size
 const MAX_BLOCK_SIZE: usize = 65464; // RFC 2348 maximum block size
 const MAX_PACKET_SIZE: usize = 65468; // Max block size + 4 byte header
 const DEFAULT_TIMEOUT_SECS: u64 = 5;
 const MAX_RETRIES: u32 = 5;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum TftpOpcode {
+pub(crate) enum TftpOpcode {
     Rrq = 1,   // Read request (RFC 1350)
     Wrq = 2,   // Write request (RFC 1350)
     Data = 3,  // Data packet (RFC 1350)
@@ -63,7 +68,7 @@ enum TftpErrorCode {
 /// - SI-10: Information Input Validation (mode validation)
 /// - CM-6: Configuration Settings (transfer mode selection)
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum TransferMode {
+pub enum TransferMode {
     /// NETASCII mode - 8-bit ASCII with network line ending conversion (CR+LF)
     /// RFC 1350: Convert local line endings to/from CR+LF format
     Netascii,
@@ -80,7 +85,7 @@ impl TransferMode {
     ///
     /// NIST Controls:
     /// - SI-10: Information Input Validation (validate mode string)
-    fn from_str(s: &str) -> std::result::Result<Self, SnowOwlError> {
+    pub fn from_str(s: &str) -> std::result::Result<Self, SnowOwlError> {
         match s.to_lowercase().as_str() {
             "netascii" => Ok(TransferMode::Netascii),
             "octet" => Ok(TransferMode::Octet),
@@ -99,7 +104,7 @@ impl TransferMode {
     /// NIST Controls:
     /// - SI-10: Information Input Validation (data format conversion)
     /// - SC-4: Information in Shared Resources (standardized encoding)
-    fn convert_to_netascii(data: &[u8]) -> Vec<u8> {
+    pub fn convert_to_netascii(data: &[u8]) -> Vec<u8> {
         let mut result = Vec::with_capacity(data.len() + data.len() / 80); // Estimate extra space for CR
         let mut i = 0;
 
@@ -144,10 +149,11 @@ impl TransferMode {
 
 // RFC 2347/2348/2349 - TFTP Options
 #[derive(Debug, Clone)]
-struct TftpOptions {
-    block_size: usize,      // RFC 2348 - Block Size Option
-    timeout: u64,           // RFC 2349 - Timeout Interval Option
-    transfer_size: Option<u64>, // RFC 2349 - Transfer Size Option
+pub struct TftpOptions {
+    pub block_size: usize,      // RFC 2348 - Block Size Option
+    pub timeout: u64,           // RFC 2349 - Timeout Interval Option
+    #[allow(dead_code)]
+    pub transfer_size: Option<u64>, // RFC 2349 - Transfer Size Option
 }
 
 impl Default for TftpOptions {
@@ -163,6 +169,7 @@ impl Default for TftpOptions {
 pub struct TftpServer {
     root_dir: PathBuf,
     bind_addr: SocketAddr,
+    multicast_server: Option<Arc<MulticastTftpServer>>,
 }
 
 impl TftpServer {
@@ -170,11 +177,28 @@ impl TftpServer {
         Self {
             root_dir,
             bind_addr,
+            multicast_server: None,
         }
     }
 
+    /// Enable multicast support with configuration
+    ///
+    /// RFC 2090: Enable multicast TFTP deployments
+    ///
+    /// NIST Controls:
+    /// - CM-6: Configuration Settings (enable multicast feature)
+    /// - SC-5: Denial of Service Protection (multicast efficiency)
+    pub fn with_multicast(mut self, config: MulticastConfig) -> Self {
+        if config.enabled {
+            let multicast_server = MulticastTftpServer::new(config, self.root_dir.clone());
+            self.multicast_server = Some(Arc::new(multicast_server));
+            info!("Multicast TFTP support enabled");
+        }
+        self
+    }
+
     pub async fn run(&self) -> Result<()> {
-        let socket = UdpSocket::bind(self.bind_addr).await?;
+        let socket = Arc::new(UdpSocket::bind(self.bind_addr).await?);
         info!("TFTP server listening on {}", self.bind_addr);
 
         let mut buf = vec![0u8; MAX_PACKET_SIZE];
@@ -184,9 +208,10 @@ impl TftpServer {
                 Ok((size, client_addr)) => {
                     let data = buf[..size].to_vec();
                     let root_dir = self.root_dir.clone();
+                    let multicast_server = self.multicast_server.clone();
 
                     tokio::spawn(async move {
-                        if let Err(e) = Self::handle_client(data, client_addr, root_dir).await {
+                        if let Err(e) = Self::handle_client(data, client_addr, root_dir, multicast_server).await {
                             error!("Error handling TFTP client {}: {}", client_addr, e);
                         }
                     });
@@ -198,7 +223,12 @@ impl TftpServer {
         }
     }
 
-    async fn handle_client(data: Vec<u8>, client_addr: SocketAddr, root_dir: PathBuf) -> Result<()> {
+    async fn handle_client(
+        data: Vec<u8>,
+        client_addr: SocketAddr,
+        root_dir: PathBuf,
+        multicast_server: Option<Arc<MulticastTftpServer>>,
+    ) -> Result<()> {
         let mut bytes = BytesMut::from(&data[..]);
 
         if bytes.len() < 2 {
@@ -233,6 +263,7 @@ impl TftpServer {
                 // Parse options (RFC 2347)
                 let mut options = TftpOptions::default();
                 let mut requested_options = HashMap::new();
+                let mut multicast_requested = false;
 
                 while bytes.remaining() > 0 {
                     let option_name = match Self::parse_string(&mut bytes) {
@@ -244,6 +275,11 @@ impl TftpServer {
                         Ok(s) => s,
                         Err(_) => break,
                     };
+
+                    // RFC 2090: Check for multicast option
+                    if option_name.to_lowercase() == "multicast" {
+                        multicast_requested = true;
+                    }
 
                     requested_options.insert(option_name.to_lowercase(), option_value);
                 }
@@ -279,6 +315,10 @@ impl TftpServer {
                                 // Will be filled with actual size later
                             }
                         }
+                        "multicast" => {
+                            // RFC 2090: Multicast option (handled separately)
+                            // Don't add to negotiated_options here
+                        }
                         _ => {
                             // Unknown option - ignore per RFC 2347
                             debug!("Ignoring unknown option: {}", name);
@@ -287,9 +327,38 @@ impl TftpServer {
                 }
 
                 debug!(
-                    "RRQ from {}: {} (mode: {}, options: {:?})",
-                    client_addr, filename, mode_str, negotiated_options
+                    "RRQ from {}: {} (mode: {}, options: {:?}, multicast: {})",
+                    client_addr, filename, mode_str, negotiated_options, multicast_requested
                 );
+
+                // RFC 2090: Handle multicast request if enabled and requested
+                if multicast_requested {
+                    if let Some(ref mcast_server) = multicast_server {
+                        info!("Processing multicast request from {}: {}", client_addr, filename);
+
+                        // Create a response socket for this client
+                        let response_socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
+                        response_socket.connect(client_addr).await?;
+
+                        // Delegate to multicast server
+                        return mcast_server.handle_multicast_request(
+                            filename,
+                            mode,
+                            options,
+                            client_addr,
+                            response_socket,
+                        ).await;
+                    } else {
+                        // Multicast requested but not enabled
+                        warn!("Multicast requested from {} but multicast is not enabled", client_addr);
+                        Self::send_error(
+                            client_addr,
+                            TftpErrorCode::OptionNegotiation,
+                            "Multicast not supported"
+                        ).await?;
+                        return Ok(());
+                    }
+                }
 
                 // Validate filename (prevent directory traversal)
                 let file_path = match Self::validate_and_resolve_path(&root_dir, &filename) {
