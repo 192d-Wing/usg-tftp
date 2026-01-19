@@ -14,6 +14,7 @@
 
 use crate::config::{LoadBalanceStrategy, TftpConfig, WriteConfig};
 use crate::error::{Result, TftpError};
+use bytes::BytesMut;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
@@ -22,7 +23,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use nix::sys::socket::{MsgFlags, MultiHeaders, SockaddrStorage, recvmmsg, sendmmsg};
@@ -94,6 +95,10 @@ pub struct SenderStats {
 pub struct WorkerPool {
     /// Worker channels for sending packets to workers
     worker_senders: Vec<mpsc::Sender<IncomingPacket>>,
+    /// Worker receivers for processing packets
+    worker_receivers: Vec<mpsc::Receiver<IncomingPacket>>,
+    /// Sender channel for workers to send responses
+    sender_tx: mpsc::Sender<OutgoingPacket>,
     /// Sender channel for receiving responses from workers
     sender_receiver: mpsc::Receiver<OutgoingPacket>,
     /// Configuration
@@ -113,12 +118,13 @@ impl WorkerPool {
 
         // Create channels between master and workers
         let mut worker_senders = Vec::with_capacity(worker_count);
+        let mut worker_receivers = Vec::with_capacity(worker_count);
         let worker_stats: Vec<Arc<WorkerStats>> = (0..worker_count)
             .map(|id| Arc::new(WorkerStats::new(id)))
             .collect();
 
         // Create channel between workers and sender
-        let (_sender_tx, sender_rx) = mpsc::channel::<OutgoingPacket>(sender_channel_size);
+        let (sender_tx, sender_rx) = mpsc::channel::<OutgoingPacket>(sender_channel_size);
 
         info!(
             "Creating worker pool with {} workers, channel sizes: worker={}, sender={}",
@@ -127,12 +133,15 @@ impl WorkerPool {
 
         // Create worker channels
         for _worker_id in 0..worker_count {
-            let (tx, _rx) = mpsc::channel::<IncomingPacket>(worker_channel_size);
+            let (tx, rx) = mpsc::channel::<IncomingPacket>(worker_channel_size);
             worker_senders.push(tx);
+            worker_receivers.push(rx);
         }
 
         Self {
             worker_senders,
+            worker_receivers,
+            sender_tx,
             sender_receiver: sender_rx,
             config,
             master_stats: Arc::new(MasterStats::default()),
@@ -180,12 +189,37 @@ impl WorkerPool {
         };
 
         // Spawn worker threads
-        let _worker_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
-        for (_worker_id, _rx) in self.worker_senders.iter().enumerate() {
-            // Create worker receiver from the channel
-            // Note: We need to refactor this to properly pass receivers
-            // For now, this is a placeholder structure
-            // TODO: Implement worker thread spawning
+        let mut _worker_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
+        for (worker_id, rx) in self.worker_receivers.into_iter().enumerate() {
+            let sender_tx = self.sender_tx.clone();
+            let config = self.config.clone();
+            let stats = self.worker_stats[worker_id].clone();
+            let root_dir = _root_dir.clone();
+            let write_config = _write_config.clone();
+            let max_file_size = _max_file_size_bytes;
+            let audit_enabled = _audit_enabled;
+            let multicast_server = _multicast_server.clone();
+
+            let handle = tokio::spawn(async move {
+                if let Err(e) = worker_thread(
+                    worker_id,
+                    rx,
+                    sender_tx,
+                    config,
+                    stats,
+                    root_dir,
+                    write_config,
+                    max_file_size,
+                    audit_enabled,
+                    multicast_server,
+                )
+                .await
+                {
+                    error!("Worker {} failed: {}", worker_id, e);
+                }
+            });
+
+            _worker_handles.push(handle);
         }
 
         // Spawn sender thread
@@ -534,6 +568,459 @@ async fn sender_thread(
 
     info!("Sender thread shutting down");
     Ok(())
+}
+
+/// Worker thread: Process TFTP packets from master and send responses to sender
+async fn worker_thread(
+    worker_id: usize,
+    mut rx: mpsc::Receiver<IncomingPacket>,
+    tx: mpsc::Sender<OutgoingPacket>,
+    config: Arc<TftpConfig>,
+    stats: Arc<WorkerStats>,
+    root_dir: std::path::PathBuf,
+    write_config: WriteConfig,
+    max_file_size: u64,
+    audit_enabled: bool,
+    multicast_server: Option<Arc<crate::multicast::MulticastTftpServer>>,
+) -> Result<()> {
+    info!("Worker {} starting", worker_id);
+
+    while let Some(packet) = rx.recv().await {
+        let start = std::time::Instant::now();
+
+        // Process TFTP packet
+        match process_tftp_packet(
+            packet,
+            &tx,
+            &config,
+            &root_dir,
+            &write_config,
+            max_file_size,
+            audit_enabled,
+            multicast_server.as_ref(),
+        )
+        .await
+        {
+            Ok(_) => {
+                // Packet processed successfully
+            }
+            Err(e) => {
+                error!("Worker {}: Error processing packet: {}", worker_id, e);
+                stats.errors.fetch_add(1, Ordering::Relaxed);
+            }
+        }
+
+        // Update statistics
+        let elapsed = start.elapsed().as_micros() as u64;
+        stats.packets_processed.fetch_add(1, Ordering::Relaxed);
+        stats
+            .total_processing_time_us
+            .fetch_add(elapsed, Ordering::Relaxed);
+    }
+
+    info!("Worker {} shutting down", worker_id);
+    Ok(())
+}
+
+/// Process a single TFTP packet and generate responses
+///
+/// This function handles initial TFTP requests (RRQ/WRQ). For ongoing transfers
+/// (DATA/ACK packets), those are handled by existing per-client tasks spawned
+/// by handle_read_request and handle_write_request.
+///
+/// The worker pool architecture is most beneficial for the initial packet processing
+/// and distributing load across cores. Once a transfer is established, the existing
+/// single-threaded async architecture is efficient for that session.
+async fn process_tftp_packet(
+    packet: IncomingPacket,
+    tx: &mpsc::Sender<OutgoingPacket>,
+    config: &TftpConfig,
+    root_dir: &std::path::Path,
+    write_config: &WriteConfig,
+    max_file_size: u64,
+    audit_enabled: bool,
+    multicast_server: Option<&Arc<crate::multicast::MulticastTftpServer>>,
+) -> Result<()> {
+    use bytes::{Buf, BytesMut};
+
+    let mut bytes = BytesMut::from(&packet.data[..]);
+
+    // Validate minimum packet size
+    if bytes.len() < 2 {
+        send_error_response(tx, packet.addr, packet.timestamp, 4, "Packet too small").await?;
+        return Ok(());
+    }
+
+    let opcode = bytes.get_u16();
+
+    // Parse opcode
+    let opcode = match opcode {
+        1 => TftpOpcode::Rrq,
+        2 => TftpOpcode::Wrq,
+        3 => TftpOpcode::Data,
+        4 => TftpOpcode::Ack,
+        5 => TftpOpcode::Error,
+        6 => TftpOpcode::Oack,
+        _ => {
+            send_error_response(
+                tx,
+                packet.addr,
+                packet.timestamp,
+                4,
+                "Illegal TFTP operation",
+            )
+            .await?;
+            return Ok(());
+        }
+    };
+
+    match opcode {
+        TftpOpcode::Rrq => {
+            // Handle Read Request
+            if let Err(e) = handle_read_request_worker(
+                packet.addr,
+                &mut bytes,
+                root_dir,
+                config,
+                max_file_size,
+                audit_enabled,
+                multicast_server,
+            )
+            .await
+            {
+                error!("Read request failed: {}", e);
+                send_error_response(tx, packet.addr, packet.timestamp, 0, &e.to_string()).await?;
+            }
+        }
+        TftpOpcode::Wrq => {
+            // Handle Write Request
+            if let Err(e) = handle_write_request_worker(
+                packet.addr,
+                &mut bytes,
+                root_dir,
+                write_config,
+                config,
+                max_file_size,
+                audit_enabled,
+            )
+            .await
+            {
+                error!("Write request failed: {}", e);
+                send_error_response(tx, packet.addr, packet.timestamp, 0, &e.to_string()).await?;
+            }
+        }
+        TftpOpcode::Data | TftpOpcode::Ack => {
+            // These packets are part of ongoing transfers
+            // In the current architecture, these should not reach workers because
+            // ongoing transfers create connected sockets that receive directly
+            debug!(
+                "Worker received {:?} packet from {} - ongoing transfers should use connected sockets",
+                opcode, packet.addr
+            );
+        }
+        TftpOpcode::Error => {
+            debug!("Worker received ERROR packet from {}", packet.addr);
+        }
+        TftpOpcode::Oack => {
+            warn!(
+                "Worker received OACK packet from {} - unexpected (OACK is server->client)",
+                packet.addr
+            );
+        }
+    }
+
+    Ok(())
+}
+
+/// Handle Read Request in worker thread
+async fn handle_read_request_worker(
+    client_addr: std::net::SocketAddr,
+    bytes: &mut BytesMut,
+    root_dir: &std::path::Path,
+    config: &TftpConfig,
+    max_file_size: u64,
+    audit_enabled: bool,
+    _multicast_server: Option<&Arc<crate::multicast::MulticastTftpServer>>,
+) -> Result<()> {
+    use crate::{TftpOptions, TransferMode};
+
+    // Parse request packet
+    let (filename, mode_str, requested_options) = parse_request_packet(bytes)?;
+
+    // Validate and parse transfer mode
+    let mode = TransferMode::from_str(&mode_str)?;
+    if mode == TransferMode::Mail {
+        return Err(TftpError::Tftp("MAIL mode not supported".into()));
+    }
+
+    info!(
+        "Worker processing RRQ: file={}, mode={:?}, from={}",
+        filename, mode, client_addr
+    );
+
+    // Validate and resolve file path (prevent directory traversal)
+    let file_path = crate::TftpServer::validate_and_resolve_path(root_dir, &filename)?;
+
+    // Negotiate options
+    let default_windowsize = config.performance.platform.batch.max_batch_size;
+    let mut options = TftpOptions {
+        windowsize: default_windowsize,
+        ..TftpOptions::default()
+    };
+    let mut negotiated_options = std::collections::HashMap::new();
+
+    for (name, value) in &requested_options {
+        match name.as_str() {
+            "blksize" => {
+                if let Ok(size) = value.parse::<usize>() {
+                    if (8..=crate::MAX_BLOCK_SIZE).contains(&size) {
+                        options.block_size = size;
+                        negotiated_options.insert("blksize".to_string(), size.to_string());
+                    }
+                }
+            }
+            "timeout" => {
+                if let Ok(t) = value.parse::<u64>() {
+                    if (1..=255).contains(&t) {
+                        options.timeout = t;
+                        negotiated_options.insert("timeout".to_string(), t.to_string());
+                    }
+                }
+            }
+            "tsize" => {
+                // For RRQ, server responds with actual file size
+                negotiated_options.insert("tsize".to_string(), "0".to_string());
+            }
+            "windowsize" => {
+                if let Ok(w) = value.parse::<usize>() {
+                    if (1..=65535).contains(&w) {
+                        options.windowsize = w;
+                        negotiated_options.insert("windowsize".to_string(), w.to_string());
+                    }
+                }
+            }
+            _ => {
+                // Unknown option - ignore per RFC 2347
+            }
+        }
+    }
+
+    // Clone config for spawned task (required for 'static lifetime)
+    let file_io_config = config.performance.platform.file_io.clone();
+
+    // Spawn transfer task using existing handle_read_request
+    tokio::spawn(async move {
+        if let Err(e) = crate::TftpServer::handle_read_request(
+            file_path,
+            client_addr,
+            mode,
+            options,
+            negotiated_options,
+            max_file_size,
+            audit_enabled,
+            &file_io_config,
+        )
+        .await
+        {
+            error!("Read transfer failed for {}: {}", client_addr, e);
+        }
+    });
+
+    Ok(())
+}
+
+/// Handle Write Request in worker thread
+async fn handle_write_request_worker(
+    client_addr: std::net::SocketAddr,
+    bytes: &mut BytesMut,
+    root_dir: &std::path::Path,
+    write_config: &WriteConfig,
+    config: &TftpConfig,
+    max_file_size: u64,
+    audit_enabled: bool,
+) -> Result<()> {
+    use crate::{TftpOptions, TransferMode};
+
+    // Parse request packet
+    let (filename, mode_str, requested_options) = parse_request_packet(bytes)?;
+
+    // Validate and parse transfer mode
+    let mode = TransferMode::from_str(&mode_str)?;
+    if mode == TransferMode::Mail {
+        return Err(TftpError::Tftp("MAIL mode not supported".into()));
+    }
+
+    info!(
+        "Worker processing WRQ: file={}, mode={:?}, from={}",
+        filename, mode, client_addr
+    );
+
+    // Check if writes are enabled
+    if !write_config.enabled {
+        return Err(TftpError::Tftp("Write operations not allowed".into()));
+    }
+
+    // Validate and resolve file path
+    let file_path = crate::TftpServer::validate_and_resolve_path(root_dir, &filename)?;
+
+    // Check if file exists
+    let file_exists = tokio::fs::metadata(&file_path).await.is_ok();
+    let file_created = !file_exists;
+
+    if file_exists && !write_config.allow_overwrite {
+        return Err(TftpError::Tftp("File already exists".into()));
+    }
+
+    // Negotiate options
+    let default_windowsize = config.performance.platform.batch.max_batch_size;
+    let mut options = TftpOptions {
+        windowsize: default_windowsize,
+        ..TftpOptions::default()
+    };
+    let mut negotiated_options = std::collections::HashMap::new();
+
+    for (name, value) in &requested_options {
+        match name.as_str() {
+            "blksize" => {
+                if let Ok(size) = value.parse::<usize>() {
+                    if (8..=crate::MAX_BLOCK_SIZE).contains(&size) {
+                        options.block_size = size;
+                        negotiated_options.insert("blksize".to_string(), size.to_string());
+                    }
+                }
+            }
+            "timeout" => {
+                if let Ok(t) = value.parse::<u64>() {
+                    if (1..=255).contains(&t) {
+                        options.timeout = t;
+                        negotiated_options.insert("timeout".to_string(), t.to_string());
+                    }
+                }
+            }
+            "tsize" => {
+                // For WRQ, acknowledge the transfer size
+                negotiated_options.insert("tsize".to_string(), value.clone());
+            }
+            "windowsize" => {
+                if let Ok(w) = value.parse::<usize>() {
+                    if (1..=65535).contains(&w) {
+                        options.windowsize = w;
+                        negotiated_options.insert("windowsize".to_string(), w.to_string());
+                    }
+                }
+            }
+            _ => {
+                // Unknown option - ignore per RFC 2347
+            }
+        }
+    }
+
+    // Spawn transfer task using existing handle_write_request
+    tokio::spawn(async move {
+        if let Err(e) = crate::TftpServer::handle_write_request(
+            file_path,
+            client_addr,
+            mode,
+            options,
+            negotiated_options,
+            max_file_size,
+            file_created,
+            audit_enabled,
+        )
+        .await
+        {
+            error!("Write transfer failed for {}: {}", client_addr, e);
+        }
+    });
+
+    Ok(())
+}
+
+/// Parse a TFTP request packet (RRQ or WRQ)
+fn parse_request_packet(
+    bytes: &mut BytesMut,
+) -> Result<(String, String, std::collections::HashMap<String, String>)> {
+    use bytes::Buf;
+
+    // Parse filename (null-terminated string)
+    let filename = parse_null_terminated_string(bytes)?;
+
+    // Parse mode (null-terminated string)
+    let mode = parse_null_terminated_string(bytes)?;
+
+    // Parse options (pairs of null-terminated strings)
+    let mut options = std::collections::HashMap::new();
+    while bytes.remaining() > 0 {
+        match parse_null_terminated_string(bytes) {
+            Ok(option_name) => match parse_null_terminated_string(bytes) {
+                Ok(option_value) => {
+                    options.insert(option_name.to_lowercase(), option_value);
+                }
+                Err(_) => break,
+            },
+            Err(_) => break,
+        }
+    }
+
+    Ok((filename, mode, options))
+}
+
+/// Parse a null-terminated string from a byte buffer
+fn parse_null_terminated_string(bytes: &mut BytesMut) -> Result<String> {
+    use bytes::Buf;
+
+    let mut result = Vec::new();
+    while bytes.remaining() > 0 {
+        let byte = bytes.get_u8();
+        if byte == 0 {
+            return String::from_utf8(result)
+                .map_err(|e| TftpError::Tftp(format!("Invalid UTF-8 in string: {}", e)));
+        }
+        result.push(byte);
+    }
+
+    Err(TftpError::Tftp("Missing null terminator".to_string()))
+}
+
+/// Send an error response via the sender channel
+async fn send_error_response(
+    tx: &mpsc::Sender<OutgoingPacket>,
+    addr: SocketAddr,
+    timestamp: Instant,
+    error_code: u16,
+    error_msg: &str,
+) -> Result<()> {
+    use bytes::BufMut;
+
+    // Build error packet: opcode (2 bytes) + error code (2 bytes) + message (null-terminated)
+    let mut data = BytesMut::with_capacity(4 + error_msg.len() + 1);
+    data.put_u16(5); // ERROR opcode
+    data.put_u16(error_code);
+    data.put(error_msg.as_bytes());
+    data.put_u8(0); // null terminator
+
+    let response = OutgoingPacket {
+        data: data.to_vec(),
+        addr,
+        timestamp,
+    };
+
+    tx.send(response)
+        .await
+        .map_err(|e| TftpError::Tftp(format!("Failed to send error response: {}", e)))?;
+
+    Ok(())
+}
+
+/// TFTP opcode enumeration
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TftpOpcode {
+    Rrq = 1,
+    Wrq = 2,
+    Data = 3,
+    Ack = 4,
+    Error = 5,
+    Oack = 6,
 }
 
 /// Internal batch send function
