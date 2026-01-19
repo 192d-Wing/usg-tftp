@@ -96,12 +96,59 @@ pub enum AuditEvent {
         blocks_sent: u16,
     },
 
-    /// Write request received (should always be denied)
+    /// Write request received
+    WriteRequest {
+        #[serde(flatten)]
+        common: CommonFields,
+        client_addr: String,
+        filename: String,
+        mode: String,
+        options: serde_json::Value,
+    },
+
+    /// Write request denied
     WriteRequestDenied {
         #[serde(flatten)]
         common: CommonFields,
         client_addr: String,
         filename: String,
+        reason: String,
+    },
+
+    /// Write operation started
+    WriteStarted {
+        #[serde(flatten)]
+        common: CommonFields,
+        client_addr: String,
+        filename: String,
+        mode: String,
+        block_size: usize,
+    },
+
+    /// Write operation completed
+    WriteCompleted {
+        #[serde(flatten)]
+        common: CommonFields,
+        client_addr: String,
+        filename: String,
+        bytes_received: u64,
+        blocks_received: u16,
+        duration_ms: u64,
+        /// Transfer throughput in bytes per second
+        throughput_bps: u64,
+        /// Average time per block in milliseconds
+        avg_block_time_ms: f64,
+        file_created: bool,
+    },
+
+    /// Write operation failed
+    WriteFailed {
+        #[serde(flatten)]
+        common: CommonFields,
+        client_addr: String,
+        filename: String,
+        error: String,
+        blocks_received: u16,
     },
 
     /// Path traversal attempt detected
@@ -309,8 +356,11 @@ impl AuditEvent {
             | AuditEvent::ServerShutdown { common, .. }
             | AuditEvent::ConnectionInitiated { common, .. }
             | AuditEvent::ReadRequest { common, .. }
+            | AuditEvent::WriteRequest { common, .. }
             | AuditEvent::TransferStarted { common, .. }
             | AuditEvent::TransferCompleted { common, .. }
+            | AuditEvent::WriteStarted { common, .. }
+            | AuditEvent::WriteCompleted { common, .. }
             | AuditEvent::MulticastSessionCreated { common, .. }
             | AuditEvent::MulticastClientJoined { common, .. }
             | AuditEvent::MulticastSessionCompleted { common, .. }
@@ -325,6 +375,7 @@ impl AuditEvent {
             | AuditEvent::FileSizeLimitExceeded { common, .. }
             | AuditEvent::ProtocolViolation { common, .. }
             | AuditEvent::TransferFailed { common, .. }
+            | AuditEvent::WriteFailed { common, .. }
             | AuditEvent::RateLimitTriggered { common, .. }
             | AuditEvent::ConfigurationError { common, .. }
             | AuditEvent::SymlinkAccessDenied { common, .. }
@@ -364,7 +415,8 @@ impl AuditLogger {
         filename.hash(&mut hasher);
         let hash = hasher.finish();
 
-        format!("{:x}-{}-{:x}",
+        format!(
+            "{:x}-{}-{:x}",
             std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
@@ -541,11 +593,94 @@ impl AuditLogger {
     }
 
     /// Log write request denied
-    pub fn write_request_denied(client_addr: SocketAddr, filename: &str) {
+    /// Log write request
+    pub fn write_request(
+        client_addr: SocketAddr,
+        filename: &str,
+        mode: &str,
+        options: serde_json::Value,
+    ) {
+        AuditEvent::WriteRequest {
+            common: CommonFields::new("info"),
+            client_addr: client_addr.to_string(),
+            filename: filename.to_string(),
+            mode: mode.to_string(),
+            options,
+        }
+        .log();
+    }
+
+    /// Log write request denied
+    pub fn write_request_denied(client_addr: SocketAddr, filename: &str, reason: &str) {
         AuditEvent::WriteRequestDenied {
             common: CommonFields::new("warn"),
             client_addr: client_addr.to_string(),
             filename: filename.to_string(),
+            reason: reason.to_string(),
+        }
+        .log();
+    }
+
+    /// Log write started
+    pub fn write_started(client_addr: SocketAddr, filename: &str, mode: &str, block_size: usize) {
+        AuditEvent::WriteStarted {
+            common: CommonFields::new("info"),
+            client_addr: client_addr.to_string(),
+            filename: filename.to_string(),
+            mode: mode.to_string(),
+            block_size,
+        }
+        .log();
+    }
+
+    /// Log write completed
+    pub fn write_completed(
+        client_addr: SocketAddr,
+        filename: &str,
+        bytes_received: u64,
+        blocks_received: u16,
+        duration_ms: u64,
+        file_created: bool,
+    ) {
+        let throughput_bps = if duration_ms > 0 {
+            (bytes_received * 1000) / duration_ms
+        } else {
+            0
+        };
+
+        let avg_block_time_ms = if blocks_received > 0 && duration_ms > 0 {
+            duration_ms as f64 / blocks_received as f64
+        } else {
+            0.0
+        };
+
+        AuditEvent::WriteCompleted {
+            common: CommonFields::new("info"),
+            client_addr: client_addr.to_string(),
+            filename: filename.to_string(),
+            bytes_received,
+            blocks_received,
+            duration_ms,
+            throughput_bps,
+            avg_block_time_ms,
+            file_created,
+        }
+        .log();
+    }
+
+    /// Log write failed
+    pub fn write_failed(
+        client_addr: SocketAddr,
+        filename: &str,
+        error: &str,
+        blocks_received: u16,
+    ) {
+        AuditEvent::WriteFailed {
+            common: CommonFields::new("error"),
+            client_addr: client_addr.to_string(),
+            filename: filename.to_string(),
+            error: error.to_string(),
+            blocks_received,
         }
         .log();
     }

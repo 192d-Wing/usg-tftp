@@ -7,8 +7,8 @@ use audit::AuditLogger;
 use bytes::{Buf, BufMut, BytesMut};
 use clap::Parser;
 use config::{
-    LogFormat, MulticastConfig, MulticastIpVersion, TftpConfig, default_multicast_addr_for_version,
-    load_config, validate_config, write_config,
+    LogFormat, MulticastConfig, MulticastIpVersion, TftpConfig, WriteConfig,
+    default_multicast_addr_for_version, load_config, validate_config, write_config,
 };
 use error::{Result, TftpError};
 use multicast::MulticastTftpServer;
@@ -17,7 +17,7 @@ use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs::File;
-use tokio::io::AsyncReadExt;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UdpSocket;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
@@ -242,6 +242,7 @@ pub struct TftpServer {
     bind_addr: SocketAddr,
     multicast_server: Option<Arc<MulticastTftpServer>>,
     max_file_size_bytes: u64,
+    write_config: WriteConfig,
     audit_enabled: bool,
 }
 
@@ -250,6 +251,7 @@ impl TftpServer {
         root_dir: PathBuf,
         bind_addr: SocketAddr,
         max_file_size_bytes: u64,
+        write_config: WriteConfig,
         audit_enabled: bool,
     ) -> Self {
         Self {
@@ -257,6 +259,7 @@ impl TftpServer {
             bind_addr,
             multicast_server: None,
             max_file_size_bytes,
+            write_config,
             audit_enabled,
         }
     }
@@ -301,6 +304,7 @@ impl TftpServer {
                     let root_dir = self.root_dir.clone();
                     let multicast_server = self.multicast_server.clone();
                     let max_file_size = self.max_file_size_bytes;
+                    let write_config = self.write_config.clone();
                     let audit_enabled = self.audit_enabled;
 
                     tokio::spawn(async move {
@@ -310,6 +314,7 @@ impl TftpServer {
                             root_dir,
                             multicast_server,
                             max_file_size,
+                            write_config,
                             audit_enabled,
                         )
                         .await
@@ -342,6 +347,7 @@ impl TftpServer {
         root_dir: PathBuf,
         multicast_server: Option<Arc<MulticastTftpServer>>,
         max_file_size_bytes: u64,
+        write_config: WriteConfig,
         audit_enabled: bool,
     ) -> Result<()> {
         let mut bytes = BytesMut::from(&data[..]);
@@ -518,7 +524,11 @@ impl TftpServer {
                                     "directory traversal attempt",
                                 );
                             } else {
-                                AuditLogger::access_violation(client_addr, &filename, &e.to_string());
+                                AuditLogger::access_violation(
+                                    client_addr,
+                                    &filename,
+                                    &e.to_string(),
+                                );
                             }
                         }
 
@@ -544,18 +554,227 @@ impl TftpServer {
                 .await?;
             }
             TftpOpcode::Wrq => {
-                let filename = Self::parse_string(&mut bytes).unwrap_or_default();
-                warn!("WRQ from {}: write not supported", client_addr);
+                // RFC 1350: WRQ packet format
+                // 2 bytes: opcode (02)
+                // string: filename (null-terminated)
+                // string: mode (null-terminated)
+                // RFC 2347: followed by optional option/value pairs
 
-                // Audit log: Write request denied
-                if audit_enabled {
-                    AuditLogger::write_request_denied(client_addr, &filename);
+                let filename = Self::parse_string(&mut bytes)?;
+                let mode_str = Self::parse_string(&mut bytes)?;
+
+                // Check if writes are enabled
+                if !write_config.enabled {
+                    warn!("WRQ from {}: writes disabled", client_addr);
+
+                    // Audit log: Write request denied
+                    if audit_enabled {
+                        AuditLogger::write_request_denied(
+                            client_addr,
+                            &filename,
+                            "writes disabled in configuration",
+                        );
+                    }
+
+                    Self::send_error(
+                        client_addr,
+                        TftpErrorCode::AccessViolation,
+                        "Write not supported",
+                    )
+                    .await?;
+                    return Ok(());
                 }
 
-                Self::send_error(
+                // Validate transfer mode
+                let mode = TransferMode::from_str(&mode_str)?;
+
+                // RFC 1350: Reject obsolete MAIL mode
+                if mode == TransferMode::Mail {
+                    warn!(
+                        "WRQ MAIL mode requested from {}: obsolete and not supported",
+                        client_addr
+                    );
+
+                    if audit_enabled {
+                        AuditLogger::write_request_denied(
+                            client_addr,
+                            &filename,
+                            "MAIL mode not supported",
+                        );
+                    }
+
+                    Self::send_error(
+                        client_addr,
+                        TftpErrorCode::IllegalOperation,
+                        "MAIL mode not supported",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+
+                // Parse options (RFC 2347)
+                let mut options = TftpOptions::default();
+                let mut requested_options = HashMap::new();
+
+                while bytes.remaining() > 0 {
+                    let option_name = match Self::parse_string(&mut bytes) {
+                        Ok(s) => s,
+                        Err(_) => break,
+                    };
+
+                    let option_value = match Self::parse_string(&mut bytes) {
+                        Ok(s) => s,
+                        Err(_) => break,
+                    };
+
+                    requested_options.insert(option_name.to_lowercase(), option_value);
+                }
+
+                // Process options
+                let mut negotiated_options = HashMap::new();
+
+                for (name, value) in &requested_options {
+                    match name.as_str() {
+                        "blksize" => {
+                            // RFC 2348 - Block Size Option
+                            if let Ok(size) = value.parse::<usize>()
+                                && (8..=MAX_BLOCK_SIZE).contains(&size)
+                            {
+                                options.block_size = size;
+                                negotiated_options.insert("blksize".to_string(), size.to_string());
+                            }
+                        }
+                        "timeout" => {
+                            // RFC 2349 - Timeout Interval Option
+                            if let Ok(timeout) = value.parse::<u64>()
+                                && (1..=255).contains(&timeout)
+                            {
+                                options.timeout = timeout;
+                                negotiated_options
+                                    .insert("timeout".to_string(), timeout.to_string());
+                            }
+                        }
+                        "tsize" => {
+                            // RFC 2349 - Transfer Size Option
+                            // For WRQ, client sends expected size (may be 0 if unknown)
+                            if let Ok(size) = value.parse::<u64>() {
+                                options.transfer_size = Some(size);
+                                negotiated_options.insert("tsize".to_string(), size.to_string());
+                            }
+                        }
+                        _ => {
+                            // Unknown option - ignore per RFC 2347
+                            debug!("Ignoring unknown option: {}", name);
+                        }
+                    }
+                }
+
+                debug!(
+                    "WRQ from {}: {} (mode: {}, options: {:?})",
+                    client_addr, filename, mode_str, negotiated_options
+                );
+
+                // Audit log: Write request received
+                if audit_enabled {
+                    AuditLogger::write_request(
+                        client_addr,
+                        &filename,
+                        &mode_str,
+                        serde_json::to_value(&negotiated_options).unwrap_or(serde_json::json!({})),
+                    );
+                }
+
+                // Validate filename (prevent directory traversal)
+                let file_path = match Self::validate_and_resolve_path(&root_dir, &filename) {
+                    Ok(path) => path,
+                    Err(e) => {
+                        // Audit log: Path validation failure
+                        if audit_enabled {
+                            if filename.contains("..") {
+                                AuditLogger::path_traversal_attempt(
+                                    client_addr,
+                                    &filename,
+                                    "directory traversal attempt",
+                                );
+                            } else {
+                                AuditLogger::access_violation(
+                                    client_addr,
+                                    &filename,
+                                    &e.to_string(),
+                                );
+                            }
+                        }
+
+                        Self::send_error(
+                            client_addr,
+                            TftpErrorCode::AccessViolation,
+                            &e.to_string(),
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+                };
+
+                // Check if filename matches allowed patterns
+                if !Self::is_write_allowed(&file_path, &root_dir, &write_config) {
+                    warn!(
+                        "WRQ from {}: {} not in allowed patterns",
+                        client_addr, filename
+                    );
+
+                    if audit_enabled {
+                        AuditLogger::write_request_denied(
+                            client_addr,
+                            &filename,
+                            "file not in allowed_patterns",
+                        );
+                    }
+
+                    Self::send_error(
+                        client_addr,
+                        TftpErrorCode::AccessViolation,
+                        "File not allowed for writing",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+
+                // Check if file exists
+                let file_exists = file_path.exists();
+
+                if file_exists && !write_config.allow_overwrite {
+                    // RFC 1350: File already exists error
+                    warn!(
+                        "WRQ from {}: file exists and overwrite disabled",
+                        client_addr
+                    );
+
+                    if audit_enabled {
+                        AuditLogger::write_request_denied(
+                            client_addr,
+                            &filename,
+                            "file exists and overwrite disabled",
+                        );
+                    }
+
+                    Self::send_error(
+                        client_addr,
+                        TftpErrorCode::FileExists,
+                        "File already exists",
+                    )
+                    .await?;
+                    return Ok(());
+                }
+
+                Self::handle_write_request(
+                    file_path,
                     client_addr,
-                    TftpErrorCode::AccessViolation,
-                    "Write not supported",
+                    mode,
+                    options,
+                    negotiated_options,
+                    max_file_size_bytes,
+                    !file_exists,
+                    audit_enabled,
                 )
                 .await?;
             }
@@ -793,6 +1012,364 @@ impl TftpServer {
         }
 
         Ok(())
+    }
+
+    /// Handle WRQ (Write Request) with support for NETASCII and OCTET modes
+    ///
+    /// NIST Controls:
+    /// - AC-3: Access Enforcement (write access validation)
+    /// - SI-10: Information Input Validation (transfer mode handling, data validation)
+    /// - SC-4: Information in Shared Resources (data format conversion)
+    /// - AU-2: Audit Events (log all write operations)
+    async fn handle_write_request(
+        file_path: PathBuf,
+        client_addr: SocketAddr,
+        mode: TransferMode,
+        options: TftpOptions,
+        negotiated_options: HashMap<String, String>,
+        max_file_size_bytes: u64,
+        file_created: bool,
+        audit_enabled: bool,
+    ) -> Result<()> {
+        let start_time = std::time::Instant::now();
+
+        // RFC 1350: Each transfer connection uses a new TID (Transfer ID)
+        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        socket.connect(client_addr).await?;
+
+        // Audit log: Write started
+        if audit_enabled {
+            let mode_str = match mode {
+                TransferMode::Netascii => "netascii",
+                TransferMode::Octet => "octet",
+                TransferMode::Mail => "mail",
+            };
+            AuditLogger::write_started(
+                client_addr,
+                &file_path.display().to_string(),
+                mode_str,
+                options.block_size,
+            );
+        }
+
+        let block_size = options.block_size;
+        let timeout = tokio::time::Duration::from_secs(options.timeout);
+
+        // RFC 2347: Send OACK if options were negotiated, or ACK block 0 to begin transfer
+        if !negotiated_options.is_empty() {
+            debug!("Sending OACK with options: {:?}", negotiated_options);
+
+            let oack_packet = Self::build_oack_packet(&negotiated_options);
+            Self::send_with_retry(&socket, &oack_packet, timeout).await?;
+        } else {
+            // No options - send ACK of block 0 to signal ready to receive
+            let mut ack_packet = BytesMut::with_capacity(4);
+            ack_packet.put_u16(TftpOpcode::Ack as u16);
+            ack_packet.put_u16(0);
+            Self::send_with_retry(&socket, &ack_packet, timeout).await?;
+        }
+
+        // Receive file data blocks
+        let mut received_data = Vec::new();
+        let mut expected_block: u16 = 1;
+        let mut buf = vec![0u8; MAX_PACKET_SIZE];
+
+        loop {
+            // Wait for DATA packet
+            match tokio::time::timeout(timeout, socket.recv(&mut buf)).await {
+                Ok(Ok(size)) => {
+                    if size < 4 {
+                        warn!("Received invalid DATA packet (too small)");
+                        continue;
+                    }
+
+                    let mut data_bytes = BytesMut::from(&buf[..size]);
+                    let opcode = data_bytes.get_u16();
+
+                    // Check for ERROR packet from client
+                    if opcode == TftpOpcode::Error as u16 {
+                        let error_code = data_bytes.get_u16();
+                        let error_msg = Self::parse_string(&mut data_bytes).unwrap_or_default();
+
+                        if audit_enabled {
+                            AuditLogger::write_failed(
+                                client_addr,
+                                &file_path.display().to_string(),
+                                &format!("Client sent error {}: {}", error_code, error_msg),
+                                expected_block.wrapping_sub(1),
+                            );
+                        }
+
+                        return Err(TftpError::Tftp(format!(
+                            "Client sent error {}: {}",
+                            error_code, error_msg
+                        )));
+                    }
+
+                    if opcode != TftpOpcode::Data as u16 {
+                        warn!("Expected DATA, got opcode {}", opcode);
+                        continue;
+                    }
+
+                    let block_num = data_bytes.get_u16();
+
+                    // Handle block number
+                    if block_num < expected_block {
+                        // Duplicate block - re-send ACK
+                        debug!("Received duplicate block {}", block_num);
+                        let mut ack_packet = BytesMut::with_capacity(4);
+                        ack_packet.put_u16(TftpOpcode::Ack as u16);
+                        ack_packet.put_u16(block_num);
+                        socket.send(&ack_packet).await?;
+                        continue;
+                    } else if block_num > expected_block {
+                        // Out of order - error
+                        warn!(
+                            "Block mismatch: expected {}, got {}",
+                            expected_block, block_num
+                        );
+                        Self::send_error_on_socket(
+                            &socket,
+                            TftpErrorCode::IllegalOperation,
+                            "Out of order block",
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+
+                    // Get data from packet
+                    let block_data = &data_bytes[..];
+                    let data_len = block_data.len();
+
+                    // Security: Check cumulative file size
+                    // NIST SC-5: Denial of Service Protection
+                    if max_file_size_bytes > 0
+                        && (received_data.len() + data_len) > max_file_size_bytes as usize
+                    {
+                        error!(
+                            "Write exceeds maximum file size {} for {}",
+                            max_file_size_bytes,
+                            file_path.display()
+                        );
+
+                        if audit_enabled {
+                            AuditLogger::file_size_limit_exceeded(
+                                client_addr,
+                                &file_path.display().to_string(),
+                                (received_data.len() + data_len) as u64,
+                                max_file_size_bytes,
+                            );
+                        }
+
+                        Self::send_error_on_socket(
+                            &socket,
+                            TftpErrorCode::DiskFull,
+                            "File too large",
+                        )
+                        .await?;
+                        return Ok(());
+                    }
+
+                    // Append data to buffer
+                    received_data.extend_from_slice(block_data);
+
+                    // Send ACK
+                    let mut ack_packet = BytesMut::with_capacity(4);
+                    ack_packet.put_u16(TftpOpcode::Ack as u16);
+                    ack_packet.put_u16(block_num);
+                    socket.send(&ack_packet).await?;
+
+                    debug!(
+                        "Received block {} ({} bytes, total: {} bytes)",
+                        block_num,
+                        data_len,
+                        received_data.len()
+                    );
+
+                    // RFC 1350: Transfer complete when data packet < block_size
+                    if data_len < block_size {
+                        info!(
+                            "Write complete: {} blocks received ({} bytes)",
+                            block_num,
+                            received_data.len()
+                        );
+                        break;
+                    }
+
+                    expected_block = expected_block.wrapping_add(1);
+                }
+                Ok(Err(e)) => {
+                    error!("Error receiving DATA: {}", e);
+
+                    if audit_enabled {
+                        AuditLogger::write_failed(
+                            client_addr,
+                            &file_path.display().to_string(),
+                            &e.to_string(),
+                            expected_block.wrapping_sub(1),
+                        );
+                    }
+
+                    return Err(e.into());
+                }
+                Err(_) => {
+                    error!("Timeout waiting for DATA block {}", expected_block);
+
+                    if audit_enabled {
+                        AuditLogger::write_failed(
+                            client_addr,
+                            &file_path.display().to_string(),
+                            "timeout waiting for data",
+                            expected_block.wrapping_sub(1),
+                        );
+                    }
+
+                    return Err(TftpError::Tftp(format!(
+                        "Timeout waiting for DATA block {}",
+                        expected_block
+                    )));
+                }
+            }
+        }
+
+        // Convert data if NETASCII mode
+        let final_data = if mode == TransferMode::Netascii {
+            // RFC 1350: NETASCII mode - convert CR+LF to local line endings (LF on Unix)
+            Self::convert_from_netascii(&received_data)
+        } else {
+            received_data
+        };
+
+        // Write file to disk
+        match Self::write_file_safely(&file_path, &final_data).await {
+            Ok(()) => {
+                debug!(
+                    "File written successfully: {} ({} bytes)",
+                    file_path.display(),
+                    final_data.len()
+                );
+
+                // Audit log: Write completed
+                if audit_enabled {
+                    let duration_ms = start_time.elapsed().as_millis() as u64;
+                    AuditLogger::write_completed(
+                        client_addr,
+                        &file_path.display().to_string(),
+                        final_data.len() as u64,
+                        expected_block,
+                        duration_ms,
+                        file_created,
+                    );
+                }
+            }
+            Err(e) => {
+                error!("Failed to write file {}: {}", file_path.display(), e);
+
+                if audit_enabled {
+                    AuditLogger::write_failed(
+                        client_addr,
+                        &file_path.display().to_string(),
+                        &e.to_string(),
+                        expected_block,
+                    );
+                }
+
+                Self::send_error_on_socket(&socket, TftpErrorCode::DiskFull, "Write failed")
+                    .await?;
+                return Err(e);
+            }
+        }
+
+        Ok(())
+    }
+
+    /// Convert data from NETASCII format (CR+LF -> LF)
+    ///
+    /// RFC 1350 NETASCII Specification:
+    /// - Lines are terminated with CR+LF (0x0D 0x0A)
+    /// - Converts network standard (CR+LF) to Unix line endings (LF)
+    fn convert_from_netascii(data: &[u8]) -> Vec<u8> {
+        let mut result = Vec::with_capacity(data.len());
+        let mut i = 0;
+
+        while i < data.len() {
+            let byte = data[i];
+
+            if byte == b'\r' && i + 1 < data.len() && data[i + 1] == b'\n' {
+                // CR+LF sequence - convert to LF
+                result.push(b'\n');
+                i += 2;
+            } else if byte == b'\r' {
+                // Bare CR - convert to LF
+                result.push(b'\n');
+                i += 1;
+            } else {
+                // Regular character - copy as-is
+                result.push(byte);
+                i += 1;
+            }
+        }
+
+        result
+    }
+
+    /// Write file with atomic operations to prevent partial writes
+    ///
+    /// NIST 800-53 Controls:
+    /// - SI-7: Software, Firmware, and Information Integrity (atomic writes)
+    /// - CM-5: Access Restrictions for Change (safe file modification)
+    async fn write_file_safely(file_path: &Path, data: &[u8]) -> Result<()> {
+        // Create parent directory if needed
+        if let Some(parent) = file_path.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+
+        // Write to temporary file first, then rename for atomicity
+        let temp_path = file_path.with_extension(".tftp-tmp");
+
+        // Write data to temp file
+        let mut file = tokio::fs::File::create(&temp_path).await?;
+        file.write_all(data).await?;
+        file.flush().await?;
+        drop(file);
+
+        // Atomic rename
+        tokio::fs::rename(&temp_path, file_path).await?;
+
+        Ok(())
+    }
+
+    /// Check if a file path is allowed for writing based on configured patterns
+    ///
+    /// NIST 800-53 Controls:
+    /// - AC-3: Access Enforcement (pattern-based access control)
+    /// - AC-6: Least Privilege (minimal write permissions)
+    ///
+    /// STIG V-222602: Applications must enforce access restrictions
+    fn is_write_allowed(file_path: &Path, root_dir: &Path, write_config: &WriteConfig) -> bool {
+        // Get the relative path from root_dir
+        let relative_path = match file_path.strip_prefix(root_dir) {
+            Ok(p) => p,
+            Err(_) => return false,
+        };
+
+        // Convert to string for pattern matching
+        let path_str = match relative_path.to_str() {
+            Some(s) => s,
+            None => return false,
+        };
+
+        // Check against all allowed patterns
+        for pattern in &write_config.allowed_patterns {
+            // Use glob pattern matching
+            if let Ok(glob_pattern) = glob::Pattern::new(pattern) {
+                if glob_pattern.matches(path_str) {
+                    return true;
+                }
+            }
+        }
+
+        false
     }
 
     // Send packet with automatic retries
@@ -1171,6 +1748,7 @@ async fn main() -> Result<()> {
         config.root_dir,
         config.bind_addr,
         config.max_file_size_bytes,
+        config.write_config,
         config.logging.audit_enabled,
     )
     .with_multicast(config.multicast);

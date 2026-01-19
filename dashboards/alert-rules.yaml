@@ -1,0 +1,333 @@
+# Alert Rules for Snow-Owl TFTP Server
+# Compatible with Prometheus AlertManager, Grafana Alerts, and similar systems
+#
+# These rules define common security and operational alerting scenarios
+# for the Snow-Owl TFTP server based on audit log events.
+
+groups:
+  # ============================================================================
+  # Security Alert Rules
+  # ============================================================================
+  - name: tftp_security_critical
+    interval: 30s
+    rules:
+      # Path traversal attempts are critical security events
+      - alert: TFTPPathTraversalAttempt
+        expr: |
+          rate(tftp_audit_events_total{event_type="path_traversal_attempt"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          category: security
+          compliance: "NIST-800-53-SI-4"
+        annotations:
+          summary: "Path traversal attack detected"
+          description: "Client {{ $labels.client_addr }} attempted path traversal with pattern {{ $labels.requested_path }}"
+          action: "Block source IP immediately and investigate"
+          runbook_url: "https://github.com/Wing/Snow-Owl/wiki/security-incidents#path-traversal"
+
+      # Symlink access attempts indicate reconnaissance
+      - alert: TFTPSymlinkAccessAttempt
+        expr: |
+          rate(tftp_audit_events_total{event_type="symlink_access_denied"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: critical
+          category: security
+          compliance: "NIST-800-53-AC-3"
+        annotations:
+          summary: "Symlink access attempt detected"
+          description: "Client {{ $labels.client_addr }} attempted to access symlink {{ $labels.requested_path }}"
+          action: "Investigate client for malicious intent"
+
+      # Multiple failed access attempts from single source
+      - alert: TFTPRepeatedAccessDenials
+        expr: |
+          rate(tftp_audit_events_total{event_type="read_denied"}[1m]) > 5
+        for: 2m
+        labels:
+          severity: high
+          category: security
+          compliance: "NIST-800-53-AU-6"
+        annotations:
+          summary: "Repeated access denials from {{ $labels.client_addr }}"
+          description: "Client {{ $labels.client_addr }} has been denied access more than 5 times per minute for 2 minutes"
+          action: "Consider rate limiting or blocking this client"
+
+      # Write attempts to read-only server
+      - alert: TFTPUnauthorizedWriteAttempt
+        expr: |
+          rate(tftp_audit_events_total{event_type="write_request_denied"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: high
+          category: security
+          compliance: "NIST-800-53-AC-3"
+        annotations:
+          summary: "Write attempt on read-only TFTP server"
+          description: "Client {{ $labels.client_addr }} attempted to write {{ $labels.filename }}"
+          action: "Verify server configuration and investigate client"
+
+      # Protocol violations may indicate attack or misconfigured client
+      - alert: TFTPProtocolViolation
+        expr: |
+          rate(tftp_audit_events_total{event_type="protocol_violation"}[5m]) > 0
+        for: 1m
+        labels:
+          severity: warning
+          category: security
+        annotations:
+          summary: "TFTP protocol violation detected"
+          description: "Client {{ $labels.client_addr }} violated TFTP protocol: {{ $labels.violation }}"
+          action: "Review client implementation"
+
+      # File size limit violations
+      - alert: TFTPFileSizeLimitViolation
+        expr: |
+          rate(tftp_audit_events_total{event_type="file_size_limit_exceeded"}[10m]) > 0
+        for: 0m
+        labels:
+          severity: warning
+          category: security
+          compliance: "NIST-800-53-SC-5"
+        annotations:
+          summary: "File size limit exceeded"
+          description: "Client {{ $labels.client_addr }} requested file {{ $labels.filename }} ({{ $labels.file_size }} bytes) exceeding limit of {{ $labels.max_allowed }} bytes"
+          action: "Review file size limits and legitimate use cases"
+
+  # ============================================================================
+  # Performance and Availability Alert Rules
+  # ============================================================================
+  - name: tftp_performance
+    interval: 1m
+    rules:
+      # Transfer failures indicate network or server issues
+      - alert: TFTPHighTransferFailureRate
+        expr: |
+          (
+            rate(tftp_audit_events_total{event_type="transfer_failed"}[5m])
+            /
+            (rate(tftp_audit_events_total{event_type="transfer_completed"}[5m]) + rate(tftp_audit_events_total{event_type="transfer_failed"}[5m]))
+          ) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High TFTP transfer failure rate"
+          description: "More than 10% of transfers are failing in the last 5 minutes"
+          action: "Check network connectivity and server health"
+
+      # Slow transfers may indicate network congestion
+      - alert: TFTPSlowTransferSpeed
+        expr: |
+          avg_over_time(tftp_transfer_throughput_bps{event_type="transfer_completed"}[10m]) < 102400
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "TFTP transfers running slowly"
+          description: "Average transfer speed is below 100 KB/s for file {{ $labels.filename }}"
+          action: "Check network performance and bandwidth"
+
+      # Very slow transfers are critical
+      - alert: TFTPCriticallySlowTransfers
+        expr: |
+          avg_over_time(tftp_transfer_throughput_bps{event_type="transfer_completed"}[5m]) < 10240
+        for: 5m
+        labels:
+          severity: critical
+          category: performance
+        annotations:
+          summary: "TFTP transfers critically slow"
+          description: "Average transfer speed is below 10 KB/s - severe performance degradation"
+          action: "Immediate investigation required - check network and server resources"
+
+      # Long transfer durations
+      - alert: TFTPLongTransferDuration
+        expr: |
+          avg_over_time(tftp_transfer_duration_ms{event_type="transfer_completed"}[10m]) > 300000
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "TFTP transfers taking too long"
+          description: "Average transfer duration exceeds 5 minutes for file {{ $labels.filename }}"
+          action: "Investigate network latency and file size"
+
+      # High block transfer time indicates packet loss or latency
+      - alert: TFTPHighBlockTransferTime
+        expr: |
+          avg_over_time(tftp_avg_block_time_ms{event_type="transfer_completed"}[10m]) > 100
+        for: 10m
+        labels:
+          severity: warning
+          category: performance
+        annotations:
+          summary: "High TFTP block transfer time"
+          description: "Average block transfer time exceeds 100ms - possible packet loss or latency"
+          action: "Check network quality and packet loss rates"
+
+  # ============================================================================
+  # Operational Alert Rules
+  # ============================================================================
+  - name: tftp_operations
+    interval: 1m
+    rules:
+      # Server restart detection
+      - alert: TFTPServerRestarted
+        expr: |
+          changes(tftp_audit_events_total{event_type="server_started"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: info
+          category: operational
+        annotations:
+          summary: "TFTP server restarted"
+          description: "TFTP server on {{ $labels.hostname }} has restarted"
+          action: "Verify restart was planned"
+
+      # Configuration errors
+      - alert: TFTPConfigurationError
+        expr: |
+          rate(tftp_audit_events_total{event_type="configuration_error"}[5m]) > 0
+        for: 0m
+        labels:
+          severity: high
+          category: operational
+        annotations:
+          summary: "TFTP configuration error"
+          description: "Configuration error detected: {{ $labels.error }}"
+          action: "Review and fix configuration file {{ $labels.config_file }}"
+
+      # No activity for extended period (possible service failure)
+      - alert: TFTPNoActivity
+        expr: |
+          rate(tftp_audit_events_total[15m]) == 0
+        for: 15m
+        labels:
+          severity: warning
+          category: operational
+        annotations:
+          summary: "No TFTP activity detected"
+          description: "No TFTP events logged in the last 15 minutes on {{ $labels.hostname }}"
+          action: "Verify server is running and accessible"
+
+      # High request volume (possible DoS or legitimate spike)
+      - alert: TFTPHighRequestVolume
+        expr: |
+          rate(tftp_audit_events_total{event_type="read_request"}[5m]) > 100
+        for: 5m
+        labels:
+          severity: warning
+          category: operational
+        annotations:
+          summary: "High TFTP request volume"
+          description: "More than 100 requests per second for the last 5 minutes"
+          action: "Verify if traffic spike is legitimate or potential DoS"
+
+  # ============================================================================
+  # Multicast Alert Rules
+  # ============================================================================
+  - name: tftp_multicast
+    interval: 1m
+    rules:
+      # Multicast session failures
+      - alert: TFTPMulticastSessionFailures
+        expr: |
+          rate(tftp_audit_events_total{event_type="multicast_client_removed",reason="timeout"}[10m]) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          category: multicast
+        annotations:
+          summary: "High multicast client timeout rate"
+          description: "More than 20% of multicast clients are timing out in session {{ $labels.session_id }}"
+          action: "Check network multicast routing and client connectivity"
+
+      # Large multicast sessions
+      - alert: TFTPLargeMulticastSession
+        expr: |
+          tftp_multicast_total_clients{event_type="multicast_client_joined"} > 50
+        for: 5m
+        labels:
+          severity: info
+          category: multicast
+        annotations:
+          summary: "Large multicast session active"
+          description: "Multicast session {{ $labels.session_id }} has more than 50 clients"
+          action: "Monitor for performance degradation"
+
+  # ============================================================================
+  # Compliance and Audit Alert Rules
+  # ============================================================================
+  - name: tftp_compliance
+    interval: 5m
+    rules:
+      # Ensure audit logging is functioning
+      - alert: TFTPAuditLoggingGap
+        expr: |
+          time() - tftp_last_audit_event_timestamp > 3600
+        for: 0m
+        labels:
+          severity: critical
+          category: compliance
+          compliance: "NIST-800-53-AU-9"
+        annotations:
+          summary: "TFTP audit logging gap detected"
+          description: "No audit events logged for more than 1 hour - possible logging failure"
+          action: "Verify audit logging configuration and check for system errors"
+
+      # Track security events for compliance reporting
+      - alert: TFTPSecurityEventThreshold
+        expr: |
+          sum(increase(tftp_audit_events_total{severity="error"}[24h])) > 100
+        for: 0m
+        labels:
+          severity: warning
+          category: compliance
+          compliance: "NIST-800-53-AU-6"
+        annotations:
+          summary: "High volume of security events"
+          description: "More than 100 security error events in the last 24 hours"
+          action: "Review security events and update incident response procedures"
+
+# ============================================================================
+# Example Prometheus Recording Rules for Common Metrics
+# ============================================================================
+# These can be used to pre-calculate metrics for faster dashboard queries
+
+recording_rules:
+  - name: tftp_metrics
+    interval: 1m
+    rules:
+      # Calculate transfer success rate
+      - record: tftp:transfer_success_rate:5m
+        expr: |
+          (
+            rate(tftp_audit_events_total{event_type="transfer_completed"}[5m])
+            /
+            (rate(tftp_audit_events_total{event_type="transfer_completed"}[5m]) + rate(tftp_audit_events_total{event_type="transfer_failed"}[5m]))
+          )
+
+      # Calculate average throughput
+      - record: tftp:avg_throughput_bps:5m
+        expr: |
+          avg_over_time(tftp_transfer_throughput_bps{event_type="transfer_completed"}[5m])
+
+      # Calculate total bytes transferred
+      - record: tftp:total_bytes_transferred:1h
+        expr: |
+          sum(increase(tftp_bytes_transferred_total{event_type="transfer_completed"}[1h]))
+
+      # Count security violations by type
+      - record: tftp:security_violations:1h
+        expr: |
+          sum by (event_type) (increase(tftp_audit_events_total{severity="error"}[1h]))
+
+      # Active transfer count
+      - record: tftp:active_transfers:1m
+        expr: |
+          sum(tftp_audit_events_total{event_type="transfer_started"}) - sum(tftp_audit_events_total{event_type=~"transfer_completed|transfer_failed"})

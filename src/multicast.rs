@@ -656,8 +656,15 @@ impl MulticastTftpServer {
         }
 
         // Handle retransmissions
-        Self::handle_retransmissions(session, &socket, &file_data, block_size, config, audit_enabled)
-            .await?;
+        Self::handle_retransmissions(
+            session,
+            &socket,
+            &file_data,
+            block_size,
+            config,
+            audit_enabled,
+        )
+        .await?;
 
         Ok(())
     }

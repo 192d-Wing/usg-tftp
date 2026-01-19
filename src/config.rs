@@ -237,6 +237,7 @@ pub(crate) fn validate_config(config: &TftpConfig, validate_bind: bool) -> Resul
     }
 
     validate_multicast_config(&config.multicast)?;
+    validate_write_config(&config.write_config)?;
     Ok(())
 }
 
@@ -250,6 +251,38 @@ pub(crate) fn validate_multicast_config(config: &MulticastConfig) -> Result<()> 
         return Err(TftpError::Tftp(
             "Multicast address does not match multicast IP version".to_string(),
         ));
+    }
+
+    Ok(())
+}
+
+pub(crate) fn validate_write_config(config: &WriteConfig) -> Result<()> {
+    // NIST AC-3: If writes are enabled, require at least one allowed pattern
+    // STIG V-222602: Enforce explicit access restrictions
+    if config.enabled && config.allowed_patterns.is_empty() {
+        return Err(TftpError::Tftp(
+            "Write operations enabled but no allowed_patterns specified. \
+            Add patterns to allowed_patterns or disable writes."
+                .to_string(),
+        ));
+    }
+
+    // Validate patterns are not overly permissive
+    // NIST AC-6: Least Privilege
+    for pattern in &config.allowed_patterns {
+        if pattern.trim().is_empty() {
+            return Err(TftpError::Tftp(
+                "Write allowed_patterns cannot contain empty patterns".to_string(),
+            ));
+        }
+
+        // Warn about overly permissive patterns
+        if pattern == "*" || pattern == "**" || pattern == "**/*" {
+            return Err(TftpError::Tftp(format!(
+                "Write pattern '{}' is too permissive. Use specific patterns like '*.txt' or 'subdir/*.cfg'",
+                pattern
+            )));
+        }
     }
 
     Ok(())
@@ -413,6 +446,90 @@ file = "{}/tftp.log"
                 assert!(format!("{err}").contains("bind_addr is not available"));
             }
         }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_writes_enabled_with_no_patterns()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let log_dir = temp_dir("write_no_pat_log")?;
+        let mut config = TftpConfig::default();
+        config.root_dir = temp_dir("write-no-patterns")?;
+        config.logging.file = Some(log_dir.join("tftp.log"));
+        config.write_config.enabled = true;
+        config.write_config.allowed_patterns = vec![];
+        match validate_config(&config, false) {
+            Ok(()) => return Err("expected error for writes enabled without patterns".into()),
+            Err(err) => {
+                assert!(format!("{err}").contains("no allowed_patterns specified"));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_empty_pattern() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let log_dir = temp_dir("empty_pat_log")?;
+        let mut config = TftpConfig::default();
+        config.root_dir = temp_dir("empty-pattern")?;
+        config.logging.file = Some(log_dir.join("tftp.log"));
+        config.write_config.enabled = true;
+        config.write_config.allowed_patterns = vec!["".to_string()];
+        match validate_config(&config, false) {
+            Ok(()) => return Err("expected error for empty pattern".into()),
+            Err(err) => {
+                assert!(format!("{err}").contains("cannot contain empty patterns"));
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn rejects_overly_permissive_patterns() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let log_dir = temp_dir("permissive_log")?;
+
+        for pattern in &["*", "**", "**/*"] {
+            let mut config = TftpConfig::default();
+            config.root_dir = temp_dir("permissive-pattern")?;
+            config.logging.file = Some(log_dir.join("tftp.log"));
+            config.write_config.enabled = true;
+            config.write_config.allowed_patterns = vec![pattern.to_string()];
+            match validate_config(&config, false) {
+                Ok(()) => return Err(format!("expected error for pattern {}", pattern).into()),
+                Err(err) => {
+                    assert!(format!("{err}").contains("too permissive"));
+                }
+            }
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn accepts_valid_write_config() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let log_dir = temp_dir("valid_write_log")?;
+        let mut config = TftpConfig::default();
+        config.root_dir = temp_dir("valid-write")?;
+        config.logging.file = Some(log_dir.join("tftp.log"));
+        config.write_config.enabled = true;
+        config.write_config.allow_overwrite = true;
+        config.write_config.allowed_patterns = vec![
+            "*.txt".to_string(),
+            "configs/*.cfg".to_string(),
+            "firmware/device-*.bin".to_string(),
+        ];
+        validate_config(&config, false)?;
+        Ok(())
+    }
+
+    #[test]
+    fn accepts_write_disabled() -> std::result::Result<(), Box<dyn std::error::Error>> {
+        let log_dir = temp_dir("write_disabled_log")?;
+        let mut config = TftpConfig::default();
+        config.root_dir = temp_dir("write-disabled")?;
+        config.logging.file = Some(log_dir.join("tftp.log"));
+        config.write_config.enabled = false;
+        config.write_config.allowed_patterns = vec![]; // Empty is OK when disabled
+        validate_config(&config, false)?;
         Ok(())
     }
 }
