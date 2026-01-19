@@ -254,6 +254,21 @@ start_server() {
 
     if kill -0 "$pid" 2>/dev/null; then
         print_success "Server started (PID: $pid)"
+
+        # Quick connectivity test
+        print_info "Testing server connectivity..."
+        if timeout 5 tftp localhost $SERVER_PORT << EOF > /dev/null 2>&1
+binary
+quit
+EOF
+        then
+            print_success "Server is responding to TFTP requests"
+        else
+            print_error "Server not responding to TFTP requests (check logs)"
+            cat "$log_file"
+            return 1
+        fi
+
         return 0
     else
         print_error "Server failed to start"
@@ -287,13 +302,23 @@ tftp_get() {
     local filename="$1"
     local output_dir="$2"
 
-    tftp localhost $SERVER_PORT << EOF > /dev/null 2>&1
+    # Create output directory if it doesn't exist
+    mkdir -p "$output_dir"
+
+    # Use timeout to prevent hanging indefinitely (30 second timeout)
+    timeout 30 tftp localhost $SERVER_PORT << EOF > /dev/null 2>&1
 binary
 get $filename $output_dir/$filename
 quit
 EOF
 
-    return $?
+    local result=$?
+    if [ $result -eq 124 ]; then
+        # Timeout occurred
+        echo "TFTP transfer timed out for $filename" >&2
+        return 1
+    fi
+    return $result
 }
 
 # Function: Measure syscall counts
@@ -374,18 +399,43 @@ measure_throughput() {
 
     # Concurrent transfers
     print_info "Testing concurrent transfers..."
+
+    # Verify server is still running
+    if ! kill -0 $(cat "$TEST_DIR/server.pid" 2>/dev/null) 2>/dev/null; then
+        print_error "Server is not running, cannot perform concurrent test"
+        return 1
+    fi
+
     start_time=$(date +%s.%N)
 
+    # Track PIDs for better error handling
+    declare -a pids=()
     for i in $(seq 1 $CONCURRENT_CLIENTS); do
         tftp_get "$MEDIUM_FILE" "$TEST_DIR/client-$i" &
+        pids+=($!)
     done
-    wait
+
+    # Wait for all background jobs with timeout
+    print_info "Waiting for $CONCURRENT_CLIENTS concurrent transfers to complete..."
+
+    # Wait for all PIDs and count failures
+    failed=0
+    for pid in "${pids[@]}"; do
+        if ! wait $pid; then
+            ((failed++))
+        fi
+    done
 
     end_time=$(date +%s.%N)
     duration=$(echo "$end_time - $start_time" | bc)
 
-    print_success "Concurrent transfers completed in ${duration}s"
+    if [ $failed -eq 0 ]; then
+        print_success "All $CONCURRENT_CLIENTS concurrent transfers completed in ${duration}s"
+    else
+        print_error "$failed out of $CONCURRENT_CLIENTS transfers failed (completed in ${duration}s)"
+    fi
     echo "concurrent_duration=$duration" >> "$RESULTS_DIR/metrics-${label}.txt"
+    echo "concurrent_failures=$failed" >> "$RESULTS_DIR/metrics-${label}.txt"
 
     stop_server
 
