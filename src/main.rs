@@ -1591,34 +1591,36 @@ impl TftpServer {
         // RFC 2349: Validate transfer size if client specified expected size
         // Check if actual received size matches the tsize option (if provided and non-zero)
         if let Some(expected_size) = options.transfer_size
-            && expected_size > 0 && final_data.len() as u64 != expected_size {
-                warn!(
-                    "Transfer size mismatch: expected {} bytes, received {} bytes",
-                    expected_size,
-                    final_data.len()
-                );
+            && expected_size > 0
+            && final_data.len() as u64 != expected_size
+        {
+            warn!(
+                "Transfer size mismatch: expected {} bytes, received {} bytes",
+                expected_size,
+                final_data.len()
+            );
 
-                if audit_enabled {
-                    AuditLogger::write_failed(
-                        client_addr,
-                        &file_path.display().to_string(),
-                        &format!(
-                            "Transfer size mismatch: expected {}, got {}",
-                            expected_size,
-                            final_data.len()
-                        ),
-                        expected_block,
-                    );
-                }
-
-                // Note: RFC 2349 doesn't specify error behavior for size mismatch
-                // We log a warning but still write the file since data was transferred successfully
-                debug!(
-                    "Proceeding with write despite size mismatch (expected: {}, actual: {})",
-                    expected_size,
-                    final_data.len()
+            if audit_enabled {
+                AuditLogger::write_failed(
+                    client_addr,
+                    &file_path.display().to_string(),
+                    &format!(
+                        "Transfer size mismatch: expected {}, got {}",
+                        expected_size,
+                        final_data.len()
+                    ),
+                    expected_block,
                 );
             }
+
+            // Note: RFC 2349 doesn't specify error behavior for size mismatch
+            // We log a warning but still write the file since data was transferred successfully
+            debug!(
+                "Proceeding with write despite size mismatch (expected: {}, actual: {})",
+                expected_size,
+                final_data.len()
+            );
+        }
 
         // Write file to disk
         match Self::write_file_safely(&file_path, &final_data).await {
@@ -1743,9 +1745,10 @@ impl TftpServer {
         for pattern in &write_config.allowed_patterns {
             // Use glob pattern matching
             if let Ok(glob_pattern) = glob::Pattern::new(pattern)
-                && glob_pattern.matches(path_str) {
-                    return true;
-                }
+                && glob_pattern.matches(path_str)
+            {
+                return true;
+            }
         }
 
         false

@@ -553,7 +553,6 @@ fn default_retransmit_timeout() -> u64 {
     5
 }
 
-
 /// Performance tuning configuration
 ///
 /// These settings control performance optimizations for high-throughput scenarios
