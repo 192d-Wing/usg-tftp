@@ -86,9 +86,17 @@ The server will automatically log all audit events to `/var/log/snow-owl/tftp-au
   "filename": "firmware.bin",
   "bytes_transferred": 1048576,
   "blocks_sent": 1024,
-  "duration_ms": 2333
+  "duration_ms": 2333,
+  "throughput_bps": 449235,
+  "avg_block_time_ms": 2.278,
+  "correlation_id": "18f2a1b3c4d-192-168-1-100-54321-a3f2d8e1"
 }
 ```
+
+**Performance Metrics:**
+- `throughput_bps`: Transfer speed in bytes per second (useful for SLA monitoring)
+- `avg_block_time_ms`: Average time per block (identifies network latency issues)
+- `correlation_id`: Links related events (read_request → transfer_started → transfer_completed)
 
 ### Security Violation Events
 
@@ -203,8 +211,28 @@ index=security-audit severity=error
 ```spl
 index=security-audit event_type="transfer_completed"
 | stats avg(duration_ms) as avg_duration,
+        avg(throughput_bps) as avg_throughput,
         sum(bytes_transferred) as total_bytes,
         count as transfers by filename
+```
+
+**Trace a complete transfer using correlation ID:**
+
+```spl
+index=security-audit correlation_id="18f2a1b3c4d-192-168-1-100-54321-a3f2d8e1"
+| table timestamp, event_type, filename, bytes_transferred, duration_ms
+| sort timestamp
+```
+
+**Performance analysis:**
+
+```spl
+index=security-audit event_type="transfer_completed"
+| stats avg(throughput_bps) as avg_bps,
+        avg(avg_block_time_ms) as avg_block_ms,
+        perc95(throughput_bps) as p95_bps by filename
+| eval avg_mbps=avg_bps/1048576
+| sort -avg_mbps
 ```
 
 ### ELK Stack (Elasticsearch, Logstash, Kibana)
@@ -303,6 +331,19 @@ service:snow-owl-tftp severity:error
 ```
 service:snow-owl-tftp event_type:transfer_completed
 @avg:duration_ms by @filename
+```
+
+**Transfer performance monitoring:**
+
+```
+service:snow-owl-tftp event_type:transfer_completed
+@avg:throughput_bps by @filename
+```
+
+**Slow transfer detection (< 100 KB/s):**
+
+```
+service:snow-owl-tftp event_type:transfer_completed throughput_bps:<102400
 ```
 
 ### AWS CloudWatch
