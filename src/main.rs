@@ -659,6 +659,24 @@ impl TftpServer {
         )?);
         info!("TFTP server listening on {}", self.bind_addr);
 
+        // Phase 4: Check if worker pool is enabled
+        if self.config.performance.platform.worker_pool.enabled {
+            info!("Worker pool enabled - using Phase 4 multi-threaded architecture");
+            let pool = worker_pool::WorkerPool::new(self.config.clone());
+            return pool
+                .start(
+                    socket,
+                    self.root_dir.clone(),
+                    self.write_config.clone(),
+                    self.max_file_size_bytes,
+                    self.audit_enabled,
+                    self.multicast_server.clone(),
+                )
+                .await;
+        } else {
+            info!("Worker pool disabled - using Phase 3 single-threaded architecture");
+        }
+
         // Performance optimization: Use buffer pool to avoid allocations
         let buffer_pool = self.buffer_pool.clone();
         let active_clients = self.active_clients.clone();

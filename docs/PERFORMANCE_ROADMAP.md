@@ -607,7 +607,112 @@ pub fn attach_tftp_filter(socket: &UdpSocket) -> Result<()> {
 
 ---
 
-## Phase 4: Real-Time & Specialized Deployments
+## Phase 4: Worker Thread Pool Architecture (Multi-core Utilization)
+
+**Timeline:** Sprint 4-5 (3 weeks) - 🟡 IN PROGRESS (~75% Complete)
+**Goal:** NGINX-style multi-threaded worker pool for improved CPU utilization
+
+### 4.0 Worker Thread Pool Implementation
+
+**Status:** 🟡 75% Complete (see [PHASE4_PROGRESS.md](PHASE4_PROGRESS.md))
+**Priority:** P0 (Critical)
+**Complexity:** High
+
+**Problem:**
+Current Phase 3 architecture uses single-threaded Tokio runtime. Despite async operations, only one CPU core is utilized, limiting concurrent throughput under high load.
+
+**Solution:**
+
+```
+Master Thread (batch receive via recvmmsg)
+    ↓
+Worker Threads (N threads, configurable)
+    ↓
+Sender Thread (batch send via sendmmsg)
+```
+
+**Architecture:**
+
+- **Master Thread**: Dedicated to receiving packets via `recvmmsg()`, distributes to workers via round-robin or client-hash
+- **Worker Threads**: Process TFTP requests (RRQ/WRQ/DATA/ACK) independently, one per CPU core
+- **Sender Thread**: Collects responses from workers, batches via `sendmmsg()`
+- **Load Balancing**: Round-robin (default), client-hash (session affinity), or least-loaded
+
+**Implementation Status:**
+
+✅ **Completed:**
+- WorkerPool data structures (`IncomingPacket`, `OutgoingPacket`, statistics)
+- Master receiver loop with packet distribution
+- Worker thread skeleton with placeholder packet processing
+- Sender thread with batched response sending
+- Configuration system (`WorkerPoolConfig`)
+- Integration with main event loop (opt-in via `worker_pool.enabled`)
+- Channel-based communication (master → workers → sender)
+- Statistics tracking (packets processed, latency, errors)
+
+⏳ **In Progress:**
+- TFTP packet processing in workers (parse opcodes, handle RRQ/WRQ/DATA/ACK)
+- Session state management across workers
+- Integration testing with concurrent clients
+
+**Configuration:**
+
+```rust
+pub struct WorkerPoolConfig {
+    pub enabled: bool,                              // Default: false (opt-in)
+    pub worker_count: usize,                        // Default: CPU cores - 2
+    pub worker_channel_size: usize,                 // Default: 256
+    pub sender_channel_size: usize,                 // Default: 512
+    pub load_balance_strategy: LoadBalanceStrategy, // Default: RoundRobin
+    pub enable_cpu_affinity: bool,                  // Default: false
+}
+
+pub enum LoadBalanceStrategy {
+    RoundRobin,    // Simple distribution
+    ClientHash,    // Session affinity via IP:port hash
+    LeastLoaded,   // Send to worker with smallest queue
+}
+```
+
+**Expected Impact:**
+
+- **Concurrent clients**: 2-4x improvement (100 → 200-400 clients)
+- **CPU utilization**: 4-8x improvement (1 core → 4-8 cores active)
+- **Throughput under load**: +100-200% improvement
+- **P99 latency**: -30-50% reduction under high concurrent load
+- **Zero impact**: at low concurrency (<10 clients)
+
+**Testing Plan:**
+
+- Benchmark with 10, 50, 100, 200 concurrent clients
+- Measure CPU utilization across cores (`htop`, `mpstat`)
+- Compare Phase 3 vs Phase 4 throughput
+- Validate TFTP protocol compliance with worker distribution
+- Test load balancing strategies
+
+**Files Modified:**
+
+- `src/worker_pool.rs` (new, 600+ lines)
+- `src/config.rs` (added WorkerPoolConfig)
+- `src/main.rs` (integration with TftpServer::run())
+- `docs/PHASE4_DESIGN.md` (comprehensive architecture)
+- `docs/PHASE4_PROGRESS.md` (implementation tracking)
+
+**Next Steps:**
+
+1. Complete TFTP packet processing in `worker_thread()`
+2. Extract/refactor `handle_client()` logic for reuse
+3. Integration testing with concurrent transfers
+4. Benchmark Phase 3 vs Phase 4 performance
+5. Optimize worker channel sizes and load balancing
+
+**Design Documentation:**
+
+See [PHASE4_DESIGN.md](PHASE4_DESIGN.md) for detailed architecture, [PHASE4_PROGRESS.md](PHASE4_PROGRESS.md) for implementation status.
+
+---
+
+## Phase 5: Real-Time & Specialized Deployments
 
 **Timeline:** Sprint 7+ (Ongoing)
 **Goal:** Mission-critical deployment support
@@ -1189,6 +1294,15 @@ systemctl reload snow-owl-tftp
 
 ### Phase 4 Targets
 
+- [ ] 2-4x concurrent client capacity (100 → 200-400 clients)
+- [ ] 4-8x CPU core utilization (1 core → 4-8 cores)
+- [ ] 100-200% throughput improvement under load
+- [ ] 30-50% P99 latency reduction under load
+- [ ] Zero regression at low concurrency (<10 clients)
+- [ ] Clean compilation and integration with Phase 3 architecture
+
+### Phase 5 Targets
+
 - [ ] <10µs jitter for real-time deployments
 - [ ] Zero packet loss under rated load
 - [ ] Deterministic performance
@@ -1297,6 +1411,7 @@ systemctl reload snow-owl-tftp
 
 | Version | Date       | Changes                                      |
 |---------|------------|----------------------------------------------|
+| 1.1     | 2026-01-19 | Added Phase 4: Worker Thread Pool (75% complete) |
 | 1.0     | 2026-01-19 | Initial roadmap created                      |
 
 ---
