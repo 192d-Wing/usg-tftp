@@ -1,0 +1,65 @@
+#!/usr/bin/env bpftrace
+/*
+ * syscall-counter.bt - Count network syscalls for TFTP server
+ * Usage: bpftrace syscall-counter.bt
+ *
+ * Traces network syscalls for all processes (filter by PID in post-processing)
+ */
+
+BEGIN
+{
+    printf("Tracing network syscalls for all threads... Hit Ctrl-C to end.\n");
+}
+
+/* Count recvfrom syscalls - trace all PIDs */
+tracepoint:syscalls:sys_enter_recvfrom
+{
+    @recvfrom_by_pid[pid]++;
+    @total_recvfrom++;
+}
+
+/* Count recvmmsg syscalls */
+tracepoint:syscalls:sys_enter_recvmmsg
+{
+    @recvmmsg_by_pid[pid]++;
+    @total_recvmmsg++;
+}
+
+/* Count sendto syscalls */
+tracepoint:syscalls:sys_enter_sendto
+{
+    @sendto_by_pid[pid]++;
+    @total_sendto++;
+}
+
+/* Count sendmmsg syscalls */
+tracepoint:syscalls:sys_enter_sendmmsg
+{
+    @sendmmsg_by_pid[pid]++;
+    @total_sendmmsg++;
+}
+
+END
+{
+    printf("\n");
+    printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    printf("  Network Syscall Summary (All PIDs)\n");
+    printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+    printf("\nrecvfrom by PID:\n");
+    print(@recvfrom_by_pid);
+    printf("\nrecvmmsg by PID:\n");
+    print(@recvmmsg_by_pid);
+    printf("\nsendto by PID:\n");
+    print(@sendto_by_pid);
+    printf("\nsendmmsg by PID:\n");
+    print(@sendmmsg_by_pid);
+
+    printf("\nSummary for parsing:\n");
+    printf("recvfrom_calls=%d\n", @total_recvfrom);
+    printf("recvmmsg_calls=%d\n", @total_recvmmsg);
+    printf("sendto_calls=%d\n", @total_sendto);
+    printf("sendmmsg_calls=%d\n", @total_sendmmsg);
+    printf("total_recv_calls=%d\n", @total_recvfrom + @total_recvmmsg);
+    printf("total_send_calls=%d\n", @total_sendto + @total_sendmmsg);
+    printf("━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n");
+}

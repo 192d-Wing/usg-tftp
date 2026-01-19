@@ -44,7 +44,7 @@ TEST_DIR="$TFTP_ROOT/benchmark-test"
 RESULTS_DIR="$TEST_DIR/results"
 BINARY="$PROJECT_ROOT/target/release/snow-owl-tftp"
 SERVER_PORT=6969  # Non-privileged port for testing
-CONCURRENT_CLIENTS=10
+CONCURRENT_CLIENTS=50  # Increased from 10 to demonstrate batch operations benefits
 
 # Test files
 SMALL_FILE="test-1kb.bin"
@@ -86,7 +86,7 @@ check_prerequisites() {
     local missing=0
 
     # Check for required commands
-    for cmd in cargo tftp strace bc; do
+    for cmd in cargo tftp bc bpftrace; do
         if command -v $cmd &> /dev/null; then
             print_success "$cmd found"
         else
@@ -99,11 +99,12 @@ check_prerequisites() {
                 tftp)
                     apt-get update && apt-get install -y tftp
                     ;;
-                strace)
-                    apt-get update && apt-get install -y strace
-                    ;;
                 bc)
                     apt-get update && apt-get install -y bc
+                    ;;
+                bpftrace)
+                    print_error "bpftrace required. Install with: apt-get install -y bpftrace"
+                    missing=1
                     ;;
             esac
         fi
@@ -362,10 +363,18 @@ measure_syscalls() {
     local pid_file="$TEST_DIR/server.pid"
     stop_server
 
-    print_info "Starting server with strace..."
-    strace -c -o "$output_file" "$BINARY" -c "$config_file" > /dev/null 2>&1 &
-    local pid=$!
-    echo $pid > "$pid_file"
+    print_info "Starting server for syscall counting..."
+    # Start server normally in background
+    "$BINARY" -c "$config_file" > /dev/null 2>&1 &
+    local server_pid=$!
+    echo $server_pid > "$pid_file"
+    sleep 2
+
+    # Start bpftrace to trace all network syscalls
+    print_info "Starting bpftrace to trace network syscalls..."
+    local bpftrace_script="$SCRIPT_DIR/syscall-counter.bt"
+    timeout 60 bpftrace "$bpftrace_script" > "$output_file" 2>&1 &
+    local bpftrace_pid=$!
     sleep 2
 
     # Perform transfers
@@ -377,22 +386,30 @@ measure_syscalls() {
 
     sleep 2
 
-    # Stop server and collect strace data
+    # Stop bpftrace (Ctrl-C signal)
+    print_info "Stopping bpftrace..."
+    if kill -INT "$bpftrace_pid" 2>/dev/null; then
+        sleep 2  # Give bpftrace time to print summary
+    fi
+
+    # Stop server
     stop_server
 
     if [ -f "$output_file" ]; then
         print_success "Syscall data collected: $output_file"
 
-        # Extract key metrics
-        local recvfrom_count=$(grep "recvfrom" "$output_file" | awk '{print $1}' || echo "0")
-        local recvmmsg_count=$(grep "recvmmsg" "$output_file" | awk '{print $1}' || echo "0")
-        local sendto_count=$(grep "sendto" "$output_file" | awk '{print $1}' || echo "0")
+        # Extract key metrics from bpftrace output
+        local recvfrom_count=$(grep "^recvfrom_calls=" "$output_file" | cut -d= -f2 || echo "0")
+        local recvmmsg_count=$(grep "^recvmmsg_calls=" "$output_file" | cut -d= -f2 || echo "0")
+        local sendto_count=$(grep "^sendto_calls=" "$output_file" | cut -d= -f2 || echo "0")
+        local sendmmsg_count=$(grep "^sendmmsg_calls=" "$output_file" | cut -d= -f2 || echo "0")
 
         echo "recvfrom_calls=$recvfrom_count" > "$RESULTS_DIR/metrics-${label}.txt"
         echo "recvmmsg_calls=$recvmmsg_count" >> "$RESULTS_DIR/metrics-${label}.txt"
         echo "sendto_calls=$sendto_count" >> "$RESULTS_DIR/metrics-${label}.txt"
+        echo "sendmmsg_calls=$sendmmsg_count" >> "$RESULTS_DIR/metrics-${label}.txt"
 
-        print_info "recvfrom: $recvfrom_count, recvmmsg: $recvmmsg_count, sendto: $sendto_count"
+        print_info "recvfrom: $recvfrom_count, recvmmsg: $recvmmsg_count, sendto: $sendto_count, sendmmsg: $sendmmsg_count"
     else
         print_error "Failed to collect syscall data"
     fi
@@ -489,12 +506,16 @@ generate_report() {
     source "$no_batch_file"
     local nb_recvfrom=$recvfrom_calls
     local nb_recvmmsg=$recvmmsg_calls
+    local nb_sendto=$sendto_calls
+    local nb_sendmmsg=${sendmmsg_calls:-0}
     local nb_throughput=$throughput
     local nb_concurrent=$concurrent_duration
 
     source "$with_batch_file"
     local wb_recvfrom=$recvfrom_calls
     local wb_recvmmsg=$recvmmsg_calls
+    local wb_sendto=$sendto_calls
+    local wb_sendmmsg=${sendmmsg_calls:-0}
     local wb_throughput=$throughput
     local wb_concurrent=$concurrent_duration
 
@@ -517,22 +538,42 @@ Binary: $BINARY
 WITHOUT Batch Operations:
   - recvfrom() calls: $nb_recvfrom
   - recvmmsg() calls: $nb_recvmmsg
+  - sendto() calls: $nb_sendto
+  - sendmmsg() calls: $nb_sendmmsg
+  - Total recv syscalls: $((nb_recvfrom + nb_recvmmsg))
+  - Total send syscalls: $((nb_sendto + nb_sendmmsg))
 
 WITH Batch Operations:
   - recvfrom() calls: $wb_recvfrom
   - recvmmsg() calls: $wb_recvmmsg
+  - sendto() calls: $wb_sendto
+  - sendmmsg() calls: $wb_sendmmsg
+  - Total recv syscalls: $((wb_recvfrom + wb_recvmmsg))
+  - Total send syscalls: $((wb_sendto + wb_sendmmsg))
 
 EOF
 
-    if [ "$nb_recvfrom" -gt 0 ] && [ "$wb_recvfrom" -gt 0 ]; then
-        local reduction=$(echo "scale=2; 100 - ($wb_recvfrom * 100 / $nb_recvfrom)" | bc)
-        echo "Syscall Reduction: ${reduction}%" >> "$report_file"
+    # Calculate recv syscall reduction
+    local nb_total_recv=$((nb_recvfrom + nb_recvmmsg))
+    local wb_total_recv=$((wb_recvfrom + wb_recvmmsg))
 
-        if (( $(echo "$reduction >= 60" | bc -l) )); then
+    if [ "$nb_total_recv" -gt 0 ] && [ "$wb_total_recv" -gt 0 ]; then
+        local recv_reduction=$(echo "scale=2; 100 - ($wb_total_recv * 100 / $nb_total_recv)" | bc)
+        echo "Recv Syscall Reduction: ${recv_reduction}%" >> "$report_file"
+
+        # Check if batch recv is actually being used
+        if [ "$wb_recvmmsg" -gt 0 ]; then
+            local batch_ratio=$(echo "scale=2; $wb_recvmmsg * 100 / $wb_total_recv" | bc)
+            echo "Batch recv usage: ${batch_ratio}% of recv calls" >> "$report_file"
+        fi
+
+        if (( $(echo "$recv_reduction >= 60" | bc -l) )); then
             echo "Status: ✓ PASS (Target: 60%+ reduction)" >> "$report_file"
         else
             echo "Status: ✗ FAIL (Target: 60%+ reduction)" >> "$report_file"
         fi
+    else
+        echo "Status: ⚠ WARNING - No recv syscalls detected" >> "$report_file"
     fi
 
     cat >> "$report_file" << EOF
