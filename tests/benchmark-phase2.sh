@@ -250,7 +250,7 @@ start_server() {
     fi
 
     # Start server in background
-    "$BINARY" -c "$config_file" > "$log_file" 2>&1 &
+    "$BINARY" --config "$config_file" > "$log_file" 2>&1 &
     local pid=$!
     echo $pid > "$pid_file"
 
