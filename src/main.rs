@@ -25,7 +25,7 @@ use std::sync::Arc;
 
 // Phase 2: Batch operations and zero-copy transfers
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-use nix::sys::socket::{recvmmsg, sendmmsg, MsgFlags, MultiHeaders, SockaddrStorage};
+use nix::sys::socket::{MsgFlags, MultiHeaders, SockaddrStorage, recvmmsg, sendmmsg};
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use std::os::unix::io::AsRawFd;
 use tokio::fs::File;
@@ -71,9 +71,7 @@ fn apply_file_hints(file: &File, config: &config::FileIoConfig, file_size: u64) 
     let fd = file.as_raw_fd();
 
     if config.use_sequential_hint {
-        let result = unsafe {
-            libc::posix_fadvise(fd, 0, file_size as i64, POSIX_FADV_SEQUENTIAL)
-        };
+        let result = unsafe { libc::posix_fadvise(fd, 0, file_size as i64, POSIX_FADV_SEQUENTIAL) };
         if result != 0 {
             debug!("Failed to set POSIX_FADV_SEQUENTIAL: errno {}", result);
         } else {
@@ -82,9 +80,7 @@ fn apply_file_hints(file: &File, config: &config::FileIoConfig, file_size: u64) 
     }
 
     if config.use_willneed_hint {
-        let result = unsafe {
-            libc::posix_fadvise(fd, 0, file_size as i64, POSIX_FADV_WILLNEED)
-        };
+        let result = unsafe { libc::posix_fadvise(fd, 0, file_size as i64, POSIX_FADV_WILLNEED) };
         if result != 0 {
             debug!("Failed to set POSIX_FADV_WILLNEED: errno {}", result);
         } else {
@@ -110,9 +106,7 @@ fn release_file_cache(file: &File, file_size: u64) {
     const POSIX_FADV_DONTNEED: libc::c_int = 4;
 
     let fd = file.as_raw_fd();
-    let result = unsafe {
-        libc::posix_fadvise(fd, 0, file_size as i64, POSIX_FADV_DONTNEED)
-    };
+    let result = unsafe { libc::posix_fadvise(fd, 0, file_size as i64, POSIX_FADV_DONTNEED) };
     if result != 0 {
         debug!("Failed to set POSIX_FADV_DONTNEED: errno {}", result);
     } else {
@@ -153,7 +147,13 @@ fn batch_recv_packets(
     let mut headers = MultiHeaders::<SockaddrStorage>::preallocate(batch_size, None);
 
     // Perform batch receive
-    match recvmmsg(socket_fd, &mut headers, iovecs.iter_mut(), MsgFlags::MSG_DONTWAIT, None) {
+    match recvmmsg(
+        socket_fd,
+        &mut headers,
+        iovecs.iter_mut(),
+        MsgFlags::MSG_DONTWAIT,
+        None,
+    ) {
         Ok(msgs_received) => {
             let mut results = Vec::new();
 
@@ -161,16 +161,12 @@ fn batch_recv_packets(
                 if let Some(addr_storage) = msg.address {
                     // Convert SockaddrStorage to SocketAddr
                     if let Some(sock_addr) = addr_storage.as_sockaddr_in() {
-                        let addr = SocketAddr::new(
-                            IpAddr::V4(sock_addr.ip().into()),
-                            sock_addr.port(),
-                        );
+                        let addr =
+                            SocketAddr::new(IpAddr::V4(sock_addr.ip().into()), sock_addr.port());
                         results.push((msg.bytes, addr));
                     } else if let Some(sock_addr) = addr_storage.as_sockaddr_in6() {
-                        let addr = SocketAddr::new(
-                            IpAddr::V6(sock_addr.ip().into()),
-                            sock_addr.port(),
-                        );
+                        let addr =
+                            SocketAddr::new(IpAddr::V6(sock_addr.ip().into()), sock_addr.port());
                         results.push((msg.bytes, addr));
                     }
                 }
@@ -179,6 +175,7 @@ fn batch_recv_packets(
             debug!("Received {} packets in batch via recvmmsg()", results.len());
             Ok(results)
         }
+        #[allow(unreachable_patterns)]
         Err(nix::errno::Errno::EAGAIN) | Err(nix::errno::Errno::EWOULDBLOCK) => {
             // No packets available
             Ok(Vec::new())
@@ -196,10 +193,7 @@ fn batch_recv_packets(
 /// Linux: Available since 3.0
 /// FreeBSD: Available since 11.0
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
-fn batch_send_packets(
-    socket: &UdpSocket,
-    packets: &[(Vec<u8>, SocketAddr)],
-) -> Result<usize> {
+fn batch_send_packets(socket: &UdpSocket, packets: &[(Vec<u8>, SocketAddr)]) -> Result<usize> {
     use nix::sys::socket::ControlMessage;
     use std::io::IoSlice;
 
@@ -217,7 +211,14 @@ fn batch_send_packets(
     let cmsgs: [ControlMessage; 0] = [];
 
     // Perform batch send
-    match sendmmsg(socket_fd, &mut headers, iovecs.iter(), &addrs, &cmsgs, MsgFlags::empty()) {
+    match sendmmsg(
+        socket_fd,
+        &mut headers,
+        iovecs.iter(),
+        &addrs,
+        &cmsgs,
+        MsgFlags::empty(),
+    ) {
         Ok(results) => {
             let sent_count = results.count();
             debug!("Sent {} packets in batch via sendmmsg()", sent_count);
