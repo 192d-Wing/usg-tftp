@@ -292,6 +292,7 @@ pub(crate) fn validate_write_config(config: &WriteConfig) -> Result<()> {
 }
 
 #[cfg(test)]
+#[allow(clippy::field_reassign_with_default)]
 mod tests {
     use super::*;
 
@@ -329,9 +330,14 @@ file = "{}/tftp.log"
     #[test]
     fn rejects_non_absolute_root_dir() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let log_dir = temp_dir("non_abs_log")?;
-        let mut config = TftpConfig::default();
-        config.root_dir = PathBuf::from("relative/path");
-        config.logging.file = Some(log_dir.join("tftp.log"));
+        let config = TftpConfig {
+            root_dir: PathBuf::from("relative/path"),
+            logging: LoggingConfig {
+                file: Some(log_dir.join("tftp.log")),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         match validate_config(&config, false) {
             Ok(()) => return Err("expected error for relative root_dir".into()),
             Err(err) => {
@@ -344,9 +350,14 @@ file = "{}/tftp.log"
     #[test]
     fn rejects_unreadable_root_dir() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let log_dir = temp_dir("unreadable_log")?;
-        let mut config = TftpConfig::default();
-        config.root_dir = PathBuf::from("/nonexistent/snow-owl-tftp");
-        config.logging.file = Some(log_dir.join("tftp.log"));
+        let config = TftpConfig {
+            root_dir: PathBuf::from("/nonexistent/snow-owl-tftp"),
+            logging: LoggingConfig {
+                file: Some(log_dir.join("tftp.log")),
+                ..Default::default()
+            },
+            ..Default::default()
+        };
         match validate_config(&config, false) {
             Ok(()) => return Err("expected error for missing root_dir".into()),
             Err(err) => {
@@ -597,7 +608,7 @@ impl Default for PerformanceConfig {
 /// Platform-specific performance optimizations for Linux/BSD systems
 /// Phase 1: Socket tuning and file I/O hints
 /// Phase 2: Zero-copy operations and batch syscalls
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct PlatformPerformanceConfig {
     /// Socket-level optimizations
@@ -613,16 +624,7 @@ pub struct PlatformPerformanceConfig {
     pub zero_copy: ZeroCopyConfig,
 }
 
-impl Default for PlatformPerformanceConfig {
-    fn default() -> Self {
-        Self {
-            socket: SocketConfig::default(),
-            file_io: FileIoConfig::default(),
-            batch: BatchConfig::default(),
-            zero_copy: ZeroCopyConfig::default(),
-        }
-    }
-}
+// Derived Default implementation
 
 /// Socket-level performance configuration
 #[derive(Debug, Clone, Serialize, Deserialize)]

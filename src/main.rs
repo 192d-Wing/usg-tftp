@@ -1,3 +1,6 @@
+// Allow unused code for items that are part of the public API or reserved for future use
+#![allow(dead_code)]
+
 mod audit;
 mod buffer_pool;
 mod config;
@@ -118,6 +121,7 @@ fn release_file_cache(file: &File, file_size: u64) {
 }
 
 #[cfg(not(target_os = "linux"))]
+#[allow(dead_code)]
 fn release_file_cache(_file: &File, _file_size: u64) {
     // File cache release not available on non-Linux platforms (for now)
 }
@@ -760,6 +764,7 @@ impl TftpServer {
     /// STIG V-222577: Applications must validate all input
     /// STIG V-222578: Applications must protect from code injection
     /// STIG V-222602: Applications must enforce access restrictions
+    #[allow(clippy::too_many_arguments)]
     async fn handle_client(
         data: Vec<u8>,
         client_addr: SocketAddr,
@@ -1305,6 +1310,7 @@ impl TftpServer {
     /// - AC-3: Access Enforcement (file access validation)
     /// - SI-10: Information Input Validation (transfer mode handling)
     /// - SC-4: Information in Shared Resources (data format conversion)
+    #[allow(clippy::too_many_arguments)]
     async fn handle_read_request(
         file_path: PathBuf,
         client_addr: SocketAddr,
@@ -1470,6 +1476,7 @@ impl TftpServer {
     }
 
     /// Send file data using buffered approach (for small NETASCII files)
+    #[allow(clippy::too_many_arguments)]
     async fn send_file_data_buffered(
         socket: &UdpSocket,
         file_data: &[u8],
@@ -1581,6 +1588,7 @@ impl TftpServer {
 
     /// Send file data using streaming approach (for large files and OCTET mode)
     /// Performance optimization: Reads file in chunks to minimize memory usage
+    #[allow(clippy::too_many_arguments)]
     async fn send_file_data_streaming(
         socket: &UdpSocket,
         mut file: File,
@@ -1720,6 +1728,7 @@ impl TftpServer {
     /// - SI-10: Information Input Validation (transfer mode handling, data validation)
     /// - SC-4: Information in Shared Resources (data format conversion)
     /// - AU-2: Audit Events (log all write operations)
+    #[allow(clippy::too_many_arguments)]
     async fn handle_write_request(
         file_path: PathBuf,
         client_addr: SocketAddr,
