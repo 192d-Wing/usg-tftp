@@ -12,9 +12,8 @@
 // - 4-8x CPU core utilization
 // - 30-50% latency reduction under load
 
-use crate::config::{FileIoConfig, LoadBalanceStrategy, TftpConfig, WriteConfig};
+use crate::config::{LoadBalanceStrategy, TftpConfig, WriteConfig};
 use crate::error::{Result, TftpError};
-use bytes::BytesMut;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::net::SocketAddr;
@@ -23,7 +22,7 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Instant;
 use tokio::net::UdpSocket;
 use tokio::sync::mpsc;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 use nix::sys::socket::{MsgFlags, MultiHeaders, SockaddrStorage, recvmmsg, sendmmsg};
@@ -119,7 +118,7 @@ impl WorkerPool {
             .collect();
 
         // Create channel between workers and sender
-        let (sender_tx, sender_rx) = mpsc::channel::<OutgoingPacket>(sender_channel_size);
+        let (_sender_tx, sender_rx) = mpsc::channel::<OutgoingPacket>(sender_channel_size);
 
         info!(
             "Creating worker pool with {} workers, channel sizes: worker={}, sender={}",
@@ -127,7 +126,7 @@ impl WorkerPool {
         );
 
         // Create worker channels
-        for worker_id in 0..worker_count {
+        for _worker_id in 0..worker_count {
             let (tx, _rx) = mpsc::channel::<IncomingPacket>(worker_channel_size);
             worker_senders.push(tx);
         }
@@ -161,6 +160,11 @@ impl WorkerPool {
 
         info!("Starting worker pool with {} workers", worker_count);
 
+        // Clone stats references before moving self
+        let master_stats = self.master_stats.clone();
+        let worker_stats = self.worker_stats.clone();
+        let sender_stats = self.sender_stats.clone();
+
         // Spawn master receiver thread
         let master_handle = {
             let socket = socket.clone();
@@ -176,7 +180,7 @@ impl WorkerPool {
         };
 
         // Spawn worker threads
-        let mut worker_handles = Vec::new();
+        let mut worker_handles: Vec<tokio::task::JoinHandle<()>> = Vec::new();
         for (worker_id, rx) in self.worker_senders.iter().enumerate() {
             // Create worker receiver from the channel
             // Note: We need to refactor this to properly pass receivers
@@ -206,7 +210,7 @@ impl WorkerPool {
         info!("Shutdown signal received, stopping worker pool");
 
         // Print final statistics
-        self.print_stats();
+        print_stats_impl(&master_stats, &worker_stats, &sender_stats);
 
         Ok(())
     }
@@ -263,6 +267,48 @@ impl WorkerPool {
             self.sender_stats.errors.load(Ordering::Relaxed),
         );
     }
+}
+
+/// Print statistics (standalone function)
+fn print_stats_impl(
+    master_stats: &Arc<MasterStats>,
+    worker_stats: &[Arc<WorkerStats>],
+    sender_stats: &Arc<SenderStats>,
+) {
+    info!("=== Worker Pool Statistics ===");
+
+    info!(
+        "Master: received={}, batches={}, dropped={}, errors={}",
+        master_stats.packets_received.load(Ordering::Relaxed),
+        master_stats.batches_received.load(Ordering::Relaxed),
+        master_stats.packets_dropped.load(Ordering::Relaxed),
+        master_stats.errors.load(Ordering::Relaxed),
+    );
+
+    for stats in worker_stats {
+        let processed = stats.packets_processed.load(Ordering::Relaxed);
+        let total_time = stats.total_processing_time_us.load(Ordering::Relaxed);
+        let avg_time = if processed > 0 {
+            total_time / processed
+        } else {
+            0
+        };
+
+        info!(
+            "Worker {}: processed={}, avg_time={}us, errors={}",
+            stats.worker_id,
+            processed,
+            avg_time,
+            stats.errors.load(Ordering::Relaxed),
+        );
+    }
+
+    info!(
+        "Sender: sent={}, batches={}, errors={}",
+        sender_stats.packets_sent.load(Ordering::Relaxed),
+        sender_stats.batches_sent.load(Ordering::Relaxed),
+        sender_stats.errors.load(Ordering::Relaxed),
+    );
 }
 
 /// Select worker based on load balancing strategy
