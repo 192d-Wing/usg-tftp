@@ -6,6 +6,7 @@ mod buffer_pool;
 mod config;
 mod error;
 mod multicast;
+mod worker_pool;
 
 use audit::AuditLogger;
 use buffer_pool::BufferPool;
@@ -135,15 +136,17 @@ fn batch_recv_packets(
     max_packets: usize,
     timeout_us: u64,
 ) -> Result<Vec<(usize, SocketAddr)>> {
-    use std::io::IoSliceMut;
     use nix::sys::time::TimeSpec;
+    use std::io::IoSliceMut;
     use std::time::Duration;
 
     let socket_fd = socket.as_raw_fd();
     let batch_size = std::cmp::min(max_packets, buffers.len());
 
-    debug!("batch_recv_packets called: fd={}, batch_size={}, timeout={}μs",
-           socket_fd, batch_size, timeout_us);
+    debug!(
+        "batch_recv_packets called: fd={}, batch_size={}, timeout={}μs",
+        socket_fd, batch_size, timeout_us
+    );
 
     // Prepare RecvMmsgData structures
     let mut iovecs: Vec<Vec<IoSliceMut>> = buffers[..batch_size]
@@ -166,7 +169,7 @@ fn batch_recv_packets(
         socket_fd,
         &mut headers,
         iovecs.iter_mut(),
-        MsgFlags::empty(),  // Don't use MSG_DONTWAIT - let timeout handle waiting
+        MsgFlags::empty(), // Don't use MSG_DONTWAIT - let timeout handle waiting
         timeout,
     ) {
         Ok(msgs_received) => {

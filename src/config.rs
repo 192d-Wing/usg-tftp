@@ -615,6 +615,7 @@ impl Default for PerformanceConfig {
 /// Platform-specific performance optimizations for Linux/BSD systems
 /// Phase 1: Socket tuning and file I/O hints
 /// Phase 2: Zero-copy operations and batch syscalls
+/// Phase 4: Worker thread pool
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(default)]
 pub struct PlatformPerformanceConfig {
@@ -629,6 +630,9 @@ pub struct PlatformPerformanceConfig {
 
     /// Zero-copy transfer optimizations (Phase 2)
     pub zero_copy: ZeroCopyConfig,
+
+    /// Worker thread pool (Phase 4)
+    pub worker_pool: WorkerPoolConfig,
 }
 
 // Derived Default implementation
@@ -797,4 +801,72 @@ impl Default for ZeroCopyConfig {
             msg_zerocopy_threshold_bytes: 8192, // 8 KB
         }
     }
+}
+
+/// Worker thread pool configuration (Phase 4)
+/// NGINX-style multi-threaded architecture for multi-core utilization
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WorkerPoolConfig {
+    /// Enable worker thread pool (Phase 4)
+    /// When disabled, uses Phase 3 single-threaded Tokio architecture
+    /// Default: false (opt-in for Phase 4)
+    pub enabled: bool,
+
+    /// Number of worker threads
+    /// Recommended: number of CPU cores - 2 (reserve for master/sender)
+    /// Valid range: 1-32
+    /// Default: auto-detected (CPU cores - 2, min 1, max 8)
+    pub worker_count: usize,
+
+    /// Channel buffer size between master and workers (packets per worker)
+    /// Higher values improve throughput but increase latency
+    /// Default: 256 packets per worker
+    pub worker_channel_size: usize,
+
+    /// Channel buffer size between workers and sender (total packets)
+    /// Default: 512 packets (shared by all workers)
+    pub sender_channel_size: usize,
+
+    /// Load balancing strategy for distributing packets to workers
+    /// Default: RoundRobin
+    pub load_balance_strategy: LoadBalanceStrategy,
+
+    /// Enable worker thread affinity (pin to CPU cores)
+    /// Improves cache locality but reduces flexibility
+    /// Linux-only feature
+    /// Default: false
+    pub enable_cpu_affinity: bool,
+}
+
+impl Default for WorkerPoolConfig {
+    fn default() -> Self {
+        // Auto-detect CPU count, reserve 2 for master/sender
+        let cpu_count = num_cpus::get();
+        let worker_count = (cpu_count.saturating_sub(2)).max(1).min(8);
+
+        Self {
+            enabled: false, // Opt-in for Phase 4
+            worker_count,
+            worker_channel_size: 256,
+            sender_channel_size: 512,
+            load_balance_strategy: LoadBalanceStrategy::RoundRobin,
+            enable_cpu_affinity: false,
+        }
+    }
+}
+
+/// Load balancing strategy for worker thread pool
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LoadBalanceStrategy {
+    /// Simple round-robin distribution
+    /// Best for uniform workloads
+    RoundRobin,
+    /// Hash client address to worker (session affinity)
+    /// Better cache locality for repeated requests from same client
+    ClientHash,
+    /// Send to worker with smallest queue (requires atomic checks)
+    /// Best for non-uniform workloads
+    LeastLoaded,
 }
