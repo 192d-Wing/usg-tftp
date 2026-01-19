@@ -109,6 +109,8 @@ build_binary() {
     print_info "Running: cargo build --release -p snow-owl-tftp"
     cargo build --release -p snow-owl-tftp
 
+    sleep 2
+
     if [ -f "$BINARY" ]; then
         print_success "Binary built: $BINARY"
         ls -lh "$BINARY"
