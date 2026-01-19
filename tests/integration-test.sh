@@ -365,9 +365,8 @@ EOF
         ) &
     done
 
-    # Wait for all transfers
-    wait
-
+    # Wait 5 seconds for all transfers
+    sleep 5
     # Verify all files downloaded correctly
     local orig_md5=$(calculate_md5 "$TEST_DIR/root/random.bin")
 
