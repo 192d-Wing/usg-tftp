@@ -80,6 +80,10 @@ pub enum AuditEvent {
         bytes_transferred: u64,
         blocks_sent: u16,
         duration_ms: u64,
+        /// Transfer throughput in bytes per second
+        throughput_bps: u64,
+        /// Average block transfer time in milliseconds
+        avg_block_time_ms: f64,
     },
 
     /// File transfer failed
@@ -174,6 +178,10 @@ pub enum AuditEvent {
         total_blocks: u16,
         total_clients: usize,
         duration_ms: u64,
+        /// Total bytes transferred in the session
+        bytes_transferred: u64,
+        /// Number of retransmission cycles required
+        retransmission_count: usize,
     },
 
     /// Rate limiting or DoS protection triggered
@@ -346,7 +354,45 @@ impl AuditLogger {
         .log();
     }
 
-    /// Log read request
+    /// Generate a correlation ID for tracking related transfer events
+    /// Format: <timestamp>-<client_addr>-<filename_hash>
+    pub fn generate_correlation_id(client_addr: SocketAddr, filename: &str) -> String {
+        use std::collections::hash_map::DefaultHasher;
+        use std::hash::{Hash, Hasher};
+
+        let mut hasher = DefaultHasher::new();
+        filename.hash(&mut hasher);
+        let hash = hasher.finish();
+
+        format!("{:x}-{}-{:x}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_millis(),
+            client_addr.to_string().replace(':', "-"),
+            hash
+        )
+    }
+
+    /// Log read request with correlation ID
+    pub fn read_request_with_correlation(
+        client_addr: SocketAddr,
+        filename: &str,
+        mode: &str,
+        options: serde_json::Value,
+        correlation_id: &str,
+    ) {
+        AuditEvent::ReadRequest {
+            common: CommonFields::with_correlation("info", correlation_id.to_string()),
+            client_addr: client_addr.to_string(),
+            filename: filename.to_string(),
+            mode: mode.to_string(),
+            options,
+        }
+        .log();
+    }
+
+    /// Log read request (without correlation ID - for backward compatibility)
     pub fn read_request(
         client_addr: SocketAddr,
         filename: &str,
@@ -374,7 +420,27 @@ impl AuditLogger {
         .log();
     }
 
-    /// Log transfer started
+    /// Log transfer started with correlation ID
+    pub fn transfer_started_with_correlation(
+        client_addr: SocketAddr,
+        filename: &str,
+        file_size: u64,
+        mode: &str,
+        block_size: usize,
+        correlation_id: &str,
+    ) {
+        AuditEvent::TransferStarted {
+            common: CommonFields::with_correlation("info", correlation_id.to_string()),
+            client_addr: client_addr.to_string(),
+            filename: filename.to_string(),
+            file_size,
+            mode: mode.to_string(),
+            block_size,
+        }
+        .log();
+    }
+
+    /// Log transfer started (without correlation ID - for backward compatibility)
     pub fn transfer_started(
         client_addr: SocketAddr,
         filename: &str,
@@ -393,7 +459,42 @@ impl AuditLogger {
         .log();
     }
 
-    /// Log transfer completed
+    /// Log transfer completed with correlation ID
+    pub fn transfer_completed_with_correlation(
+        client_addr: SocketAddr,
+        filename: &str,
+        bytes_transferred: u64,
+        blocks_sent: u16,
+        duration_ms: u64,
+        correlation_id: &str,
+    ) {
+        // Calculate performance metrics
+        let throughput_bps = if duration_ms > 0 {
+            (bytes_transferred * 1000) / duration_ms
+        } else {
+            0
+        };
+
+        let avg_block_time_ms = if blocks_sent > 0 && duration_ms > 0 {
+            duration_ms as f64 / blocks_sent as f64
+        } else {
+            0.0
+        };
+
+        AuditEvent::TransferCompleted {
+            common: CommonFields::with_correlation("info", correlation_id.to_string()),
+            client_addr: client_addr.to_string(),
+            filename: filename.to_string(),
+            bytes_transferred,
+            blocks_sent,
+            duration_ms,
+            throughput_bps,
+            avg_block_time_ms,
+        }
+        .log();
+    }
+
+    /// Log transfer completed (without correlation ID - for backward compatibility)
     pub fn transfer_completed(
         client_addr: SocketAddr,
         filename: &str,
@@ -401,6 +502,19 @@ impl AuditLogger {
         blocks_sent: u16,
         duration_ms: u64,
     ) {
+        // Calculate performance metrics
+        let throughput_bps = if duration_ms > 0 {
+            (bytes_transferred * 1000) / duration_ms
+        } else {
+            0
+        };
+
+        let avg_block_time_ms = if blocks_sent > 0 && duration_ms > 0 {
+            duration_ms as f64 / blocks_sent as f64
+        } else {
+            0.0
+        };
+
         AuditEvent::TransferCompleted {
             common: CommonFields::new("info"),
             client_addr: client_addr.to_string(),
@@ -408,6 +522,8 @@ impl AuditLogger {
             bytes_transferred,
             blocks_sent,
             duration_ms,
+            throughput_bps,
+            avg_block_time_ms,
         }
         .log();
     }

@@ -5,6 +5,30 @@ use std::path::PathBuf;
 
 use crate::error::{Result, TftpError};
 
+/// Write operation configuration for TFTP
+///
+/// NIST 800-53 Controls:
+/// - AC-3: Access Enforcement (restrict write access)
+/// - AC-6: Least Privilege (minimal write permissions)
+/// - CM-5: Access Restrictions for Change (control file modifications)
+///
+/// STIG V-222602: Applications must enforce access restrictions
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WriteConfig {
+    /// Enable write operations (disabled by default for security)
+    pub enabled: bool,
+
+    /// Allow overwriting existing files
+    /// When false, returns "File already exists" error per RFC 1350
+    pub allow_overwrite: bool,
+
+    /// List of glob patterns that are allowed to be written
+    /// Examples: ["*.txt", "configs/*.cfg", "firmware/device-*.bin"]
+    /// Empty list means no writes are allowed
+    pub allowed_patterns: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
 pub struct TftpConfig {
@@ -12,6 +36,7 @@ pub struct TftpConfig {
     pub bind_addr: SocketAddr,
     pub multicast: MulticastConfig,
     pub logging: LoggingConfig,
+    pub write_config: WriteConfig,
     /// Maximum file size in bytes that can be served (default: 100MB)
     /// Set to 0 for unlimited (not recommended for security)
     pub max_file_size_bytes: u64,
@@ -24,6 +49,7 @@ impl Default for TftpConfig {
             bind_addr: SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 69),
             multicast: MulticastConfig::default(),
             logging: LoggingConfig::default(),
+            write_config: WriteConfig::default(),
             max_file_size_bytes: 104_857_600, // 100 MB default
         }
     }
@@ -405,4 +431,14 @@ fn default_master_timeout() -> u64 {
 
 fn default_retransmit_timeout() -> u64 {
     5
+}
+
+impl Default for WriteConfig {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            allow_overwrite: false,
+            allowed_patterns: Vec::new(),
+        }
+    }
 }
