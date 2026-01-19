@@ -1260,20 +1260,23 @@ impl TftpServer {
         loop {
             // Read a chunk from the file
             let bytes_read = file.read(&mut read_buffer).await?;
-            if bytes_read == 0 {
-                break; // EOF
-            }
 
-            let block_data = if mode == TransferMode::Netascii {
-                // For NETASCII, convert this chunk
-                // Note: This is chunked processing for large NETASCII files
-                netascii_buffer.clear();
-                netascii_buffer.extend_from_slice(
-                    TransferMode::convert_to_netascii(&read_buffer[..bytes_read]).as_slice(),
-                );
-                &netascii_buffer[..]
+            // Determine block data based on mode
+            let block_data = if bytes_read > 0 {
+                if mode == TransferMode::Netascii {
+                    // For NETASCII, convert this chunk
+                    // Note: This is chunked processing for large NETASCII files
+                    netascii_buffer.clear();
+                    netascii_buffer.extend_from_slice(
+                        TransferMode::convert_to_netascii(&read_buffer[..bytes_read]).as_slice(),
+                    );
+                    &netascii_buffer[..]
+                } else {
+                    &read_buffer[..bytes_read]
+                }
             } else {
-                &read_buffer[..bytes_read]
+                // EOF reached - send empty data to signal completion (RFC 1350)
+                &[]
             };
 
             let mut data_packet = BytesMut::with_capacity(4 + block_data.len());
@@ -1319,11 +1322,9 @@ impl TftpServer {
 
             bytes_transferred += block_data.len() as u64;
 
-            // RFC 1350: Transfer complete when data packet < block_size
-            // Check bytes_read (from file) not block_data.len() (after NETASCII conversion)
-            let is_last_block = bytes_read < block_size;
-
-            if is_last_block {
+            // RFC 1350: Transfer complete when we send a packet < block_size
+            // This includes the case where file size is exact multiple of block_size
+            if bytes_read < block_size {
                 debug!(
                     "Transfer complete: {} blocks sent ({} bytes, streaming mode)",
                     block_num, bytes_transferred
