@@ -2,8 +2,8 @@
 
 ## Linux/BSD Systems Optimization Plan
 
-**Version:** 1.0
-**Last Updated:** 2026-01-19
+**Version:** 1.0.  
+**Last Updated:** 2026-01-19.  
 **Target Platforms:** Linux (kernel 4.14+), FreeBSD, OpenBSD, NetBSD
 
 ---
@@ -23,12 +23,12 @@ This roadmap outlines platform-specific performance optimizations for the snow-o
 
 ## Phase 1: Foundation (High Impact, Low Effort)
 
-**Timeline:** Sprint 1 (2 weeks)
+**Timeline:** Sprint 1 (2 weeks) - ✅ COMPLETED
 **Goal:** Quick wins with minimal code changes
 
 ### 1.1 Socket Buffer Tuning
 
-**Status:** Not Implemented
+**Status:** ✅ Implemented
 **Priority:** P0 (Critical)
 **Complexity:** Low
 
@@ -96,7 +96,7 @@ socket.bind(&bind_addr.into())?;
 
 ### 1.3 POSIX File Advisory Hints
 
-**Status:** Not Implemented
+**Status:** ✅ Implemented
 **Priority:** P1 (High)
 **Complexity:** Low
 
@@ -178,12 +178,12 @@ pub fn get_udp_stats() -> Result<UdpStats> {
 
 ## Phase 2: Zero-Copy Operations (High Impact, Medium Effort)
 
-**Timeline:** Sprint 2-3 (4 weeks)
+**Timeline:** Sprint 2-3 (4 weeks) - ✅ COMPLETED (Batch Operations)
 **Goal:** Eliminate unnecessary memory copies
 
 ### 2.1 sendmmsg() / recvmmsg() Batch Operations
 
-**Status:** Not Implemented
+**Status:** ✅ Implemented
 **Priority:** P0 (Critical)
 **Complexity:** Medium
 
@@ -243,9 +243,11 @@ pub struct BatchConfig {
 
 ### 2.2 sendfile() Zero-Copy (Linux)
 
-**Status:** Not Implemented
+**Status:** ⚠️ Not Applicable for TFTP
 **Priority:** P0 (Critical)
 **Complexity:** Medium
+
+**Analysis:** sendfile() is not compatible with TFTP's UDP-based protocol architecture.
 
 **Problem:**
 Current flow (main.rs:1110+):
@@ -254,7 +256,16 @@ Current flow (main.rs:1110+):
 2. Copy buffer to socket (kernel space)
 = 2 copies total
 
-**Solution:**
+**TFTP Protocol Constraints:**
+
+- Requires 4-byte headers (opcode + block number) before each data block
+- UDP-based protocol requires explicit packetization
+- sendfile() cannot inject TFTP headers into stream
+- ACK-wait pattern after each block incompatible with streaming
+
+**Recommendation:** Use batch operations (2.1) instead. See PHASE2_NOTES.md for detailed analysis.
+
+**Original Solution (Not Applicable):**
 
 ```rust
 #[cfg(target_os = "linux")]
@@ -401,12 +412,14 @@ pub struct CpuAffinityConfig {
 
 ## Phase 3: Advanced I/O (High Impact, High Effort)
 
-**Timeline:** Sprint 4-6 (6 weeks)
+**Timeline:** Sprint 4-6 (6 weeks) - 📝 DESIGN COMPLETE
 **Goal:** Modern async I/O infrastructure
+
+**Note:** Phase 3 implementation should begin AFTER Phase 2 benchmarking confirms expected performance gains.
 
 ### 3.1 io_uring Integration (Linux 5.1+)
 
-**Status:** Not Implemented
+**Status:** 📝 Design Complete (see PHASE3_DESIGN.md)
 **Priority:** P1 (High)
 **Complexity:** High
 

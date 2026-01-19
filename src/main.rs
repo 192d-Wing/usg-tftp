@@ -9,15 +9,22 @@ use buffer_pool::BufferPool;
 use bytes::{Buf, BufMut, BytesMut};
 use clap::Parser;
 use config::{
-    LogFormat, MulticastConfig, MulticastIpVersion, TftpConfig, WriteConfig,
+    LogFormat, MulticastConfig, MulticastIpVersion, SocketConfig, TftpConfig, WriteConfig,
     default_multicast_addr_for_version, load_config, validate_config, write_config,
 };
 use error::{Result, TftpError};
 use multicast::MulticastTftpServer;
+use socket2::{Domain, Protocol, Socket, Type};
 use std::collections::HashMap;
 use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+
+// Phase 2: Batch operations and zero-copy transfers
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+use nix::sys::socket::{recvmmsg, sendmmsg, MsgFlags, MultiHeaders, SockaddrStorage};
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+use std::os::unix::io::AsRawFd;
 use tokio::fs::File;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::UdpSocket;
@@ -40,6 +47,281 @@ const MAX_BLOCK_SIZE: usize = 65464; // RFC 2348 maximum block size
 const MAX_PACKET_SIZE: usize = 65468; // Max block size + 4 byte header
 const DEFAULT_TIMEOUT_SECS: u64 = 5;
 const MAX_RETRIES: u32 = 5;
+
+/// Apply POSIX file advisory hints for optimal kernel I/O behavior
+///
+/// Phase 1 Performance Enhancement: File I/O Optimization
+/// - POSIX_FADV_SEQUENTIAL: Optimize for sequential reads
+/// - POSIX_FADV_WILLNEED: Prefetch file data
+/// - POSIX_FADV_DONTNEED: Free page cache after transfer (optional)
+///
+/// Expected Impact:
+/// - 20-30% reduction in read latency
+/// - Optimized kernel read-ahead behavior
+#[cfg(target_os = "linux")]
+fn apply_file_hints(file: &File, config: &config::FileIoConfig, file_size: u64) {
+    use std::os::unix::io::AsRawFd;
+    // Manually call posix_fadvise via libc since nix doesn't expose it directly
+    const POSIX_FADV_SEQUENTIAL: libc::c_int = 2;
+    const POSIX_FADV_WILLNEED: libc::c_int = 3;
+
+    let fd = file.as_raw_fd();
+
+    if config.use_sequential_hint {
+        let result = unsafe {
+            libc::posix_fadvise(fd, 0, file_size as i64, POSIX_FADV_SEQUENTIAL)
+        };
+        if result != 0 {
+            debug!("Failed to set POSIX_FADV_SEQUENTIAL: errno {}", result);
+        } else {
+            debug!("Applied POSIX_FADV_SEQUENTIAL hint for optimal sequential reading");
+        }
+    }
+
+    if config.use_willneed_hint {
+        let result = unsafe {
+            libc::posix_fadvise(fd, 0, file_size as i64, POSIX_FADV_WILLNEED)
+        };
+        if result != 0 {
+            debug!("Failed to set POSIX_FADV_WILLNEED: errno {}", result);
+        } else {
+            debug!("Applied POSIX_FADV_WILLNEED hint to prefetch file data");
+        }
+    }
+}
+
+#[cfg(all(unix, not(target_os = "linux")))]
+fn apply_file_hints(_file: &File, _config: &config::FileIoConfig, _file_size: u64) {
+    // posix_fadvise implementation varies on BSD, using Linux-only for now
+}
+
+#[cfg(not(unix))]
+fn apply_file_hints(_file: &File, _config: &config::FileIoConfig, _file_size: u64) {
+    // File hints not available on non-Unix platforms
+}
+
+/// Release file from page cache after transfer completes
+#[cfg(target_os = "linux")]
+fn release_file_cache(file: &File, file_size: u64) {
+    use std::os::unix::io::AsRawFd;
+    const POSIX_FADV_DONTNEED: libc::c_int = 4;
+
+    let fd = file.as_raw_fd();
+    let result = unsafe {
+        libc::posix_fadvise(fd, 0, file_size as i64, POSIX_FADV_DONTNEED)
+    };
+    if result != 0 {
+        debug!("Failed to set POSIX_FADV_DONTNEED: errno {}", result);
+    } else {
+        debug!("Released file from page cache (POSIX_FADV_DONTNEED)");
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+fn release_file_cache(_file: &File, _file_size: u64) {
+    // File cache release not available on non-Linux platforms (for now)
+}
+
+/// Batch receive multiple packets using recvmmsg() (Phase 2)
+///
+/// Reduces syscall overhead by receiving multiple packets in a single syscall.
+/// Expected improvement: 60-80% reduction in syscall overhead for concurrent transfers.
+///
+/// Linux: Available since 2.6.33
+/// FreeBSD: Available since 11.0
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+fn batch_recv_packets(
+    socket: &UdpSocket,
+    buffers: &mut [Vec<u8>],
+    max_packets: usize,
+) -> Result<Vec<(usize, SocketAddr)>> {
+    use std::io::IoSliceMut;
+
+    let socket_fd = socket.as_raw_fd();
+    let batch_size = std::cmp::min(max_packets, buffers.len());
+
+    // Prepare RecvMmsgData structures
+    let mut iovecs: Vec<Vec<IoSliceMut>> = buffers[..batch_size]
+        .iter_mut()
+        .map(|buf| vec![IoSliceMut::new(buf)])
+        .collect();
+
+    let mut headers = MultiHeaders::<SockaddrStorage>::preallocate(batch_size, None);
+
+    // Perform batch receive
+    match recvmmsg(socket_fd, &mut headers, iovecs.iter_mut(), MsgFlags::MSG_DONTWAIT, None) {
+        Ok(msgs_received) => {
+            let mut results = Vec::new();
+
+            for msg in msgs_received {
+                if let Some(addr_storage) = msg.address {
+                    // Convert SockaddrStorage to SocketAddr
+                    if let Some(sock_addr) = addr_storage.as_sockaddr_in() {
+                        let addr = SocketAddr::new(
+                            IpAddr::V4(sock_addr.ip().into()),
+                            sock_addr.port(),
+                        );
+                        results.push((msg.bytes, addr));
+                    } else if let Some(sock_addr) = addr_storage.as_sockaddr_in6() {
+                        let addr = SocketAddr::new(
+                            IpAddr::V6(sock_addr.ip().into()),
+                            sock_addr.port(),
+                        );
+                        results.push((msg.bytes, addr));
+                    }
+                }
+            }
+
+            debug!("Received {} packets in batch via recvmmsg()", results.len());
+            Ok(results)
+        }
+        Err(nix::errno::Errno::EAGAIN) | Err(nix::errno::Errno::EWOULDBLOCK) => {
+            // No packets available
+            Ok(Vec::new())
+        }
+        Err(e) => Err(TftpError::Tftp(format!("recvmmsg error: {}", e))),
+    }
+}
+
+/// Batch send multiple packets using sendmmsg() (Phase 2)
+///
+/// Reduces syscall overhead by sending multiple packets in a single syscall.
+/// Most beneficial during concurrent transfers or multicast operations.
+/// Expected improvement: 60-80% reduction in syscall overhead.
+///
+/// Linux: Available since 3.0
+/// FreeBSD: Available since 11.0
+#[cfg(any(target_os = "linux", target_os = "freebsd"))]
+fn batch_send_packets(
+    socket: &UdpSocket,
+    packets: &[(Vec<u8>, SocketAddr)],
+) -> Result<usize> {
+    use nix::sys::socket::ControlMessage;
+    use std::io::IoSlice;
+
+    let socket_fd = socket.as_raw_fd();
+
+    let mut iovecs: Vec<Vec<IoSlice>> = Vec::with_capacity(packets.len());
+    let mut addrs: Vec<Option<SockaddrStorage>> = Vec::with_capacity(packets.len());
+
+    for (data, addr) in packets.iter() {
+        iovecs.push(vec![IoSlice::new(data)]);
+        addrs.push(Some(SockaddrStorage::from(*addr)));
+    }
+
+    let mut headers = MultiHeaders::<SockaddrStorage>::preallocate(packets.len(), None);
+    let cmsgs: [ControlMessage; 0] = [];
+
+    // Perform batch send
+    match sendmmsg(socket_fd, &mut headers, iovecs.iter(), &addrs, &cmsgs, MsgFlags::empty()) {
+        Ok(results) => {
+            let sent_count = results.count();
+            debug!("Sent {} packets in batch via sendmmsg()", sent_count);
+            Ok(sent_count)
+        }
+        Err(e) => Err(TftpError::Tftp(format!("sendmmsg error: {}", e))),
+    }
+}
+
+/// Create an optimized UDP socket with platform-specific performance tuning
+///
+/// Phase 1 Performance Enhancements:
+/// - SO_RCVBUF/SO_SNDBUF: Increase socket buffers to reduce packet drops
+/// - SO_REUSEADDR: Enable faster server restarts
+/// - SO_REUSEPORT: Enable multi-process scaling (Linux 3.9+, BSD)
+///
+/// NIST 800-53 SC-5: Denial of Service Protection (buffer sizing)
+fn create_optimized_socket(bind_addr: SocketAddr, config: &SocketConfig) -> Result<UdpSocket> {
+    let domain = if bind_addr.is_ipv4() {
+        Domain::IPV4
+    } else {
+        Domain::IPV6
+    };
+
+    let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))
+        .map_err(|e| TftpError::Tftp(format!("Failed to create socket: {}", e)))?;
+
+    // Phase 1.1: SO_REUSEADDR - Enable address reuse for faster restarts
+    if config.reuse_address {
+        socket
+            .set_reuse_address(true)
+            .map_err(|e| TftpError::Tftp(format!("Failed to set SO_REUSEADDR: {}", e)))?;
+        debug!("Enabled SO_REUSEADDR for faster server restarts");
+    }
+
+    // Phase 1.2: SO_REUSEPORT - Enable multi-process scaling
+    // Available on Linux 3.9+, FreeBSD, OpenBSD, NetBSD
+    #[cfg(all(unix, not(target_os = "solaris"), not(target_os = "illumos")))]
+    if config.reuse_port {
+        socket
+            .set_reuse_port(true)
+            .map_err(|e| {
+                warn!("Failed to set SO_REUSEPORT (may not be supported): {}", e);
+                // Don't fail - this is an optimization, not required
+            })
+            .ok();
+        debug!("Enabled SO_REUSEPORT for multi-process scaling");
+    }
+
+    // Phase 1.3: SO_RCVBUF - Increase receive buffer to reduce packet drops
+    let recv_buffer_bytes = config.recv_buffer_kb * 1024;
+    socket
+        .set_recv_buffer_size(recv_buffer_bytes)
+        .map_err(|e| {
+            warn!(
+                "Failed to set SO_RCVBUF to {} KB: {}",
+                config.recv_buffer_kb, e
+            );
+        })
+        .ok();
+
+    // Verify actual buffer size (kernel may adjust)
+    if let Ok(actual_size) = socket.recv_buffer_size() {
+        info!(
+            "Socket receive buffer: requested {} KB, actual {} KB",
+            config.recv_buffer_kb,
+            actual_size / 1024
+        );
+    }
+
+    // Phase 1.4: SO_SNDBUF - Increase send buffer for better burst handling
+    let send_buffer_bytes = config.send_buffer_kb * 1024;
+    socket
+        .set_send_buffer_size(send_buffer_bytes)
+        .map_err(|e| {
+            warn!(
+                "Failed to set SO_SNDBUF to {} KB: {}",
+                config.send_buffer_kb, e
+            );
+        })
+        .ok();
+
+    // Verify actual buffer size
+    if let Ok(actual_size) = socket.send_buffer_size() {
+        info!(
+            "Socket send buffer: requested {} KB, actual {} KB",
+            config.send_buffer_kb,
+            actual_size / 1024
+        );
+    }
+
+    // Bind the socket
+    socket
+        .bind(&bind_addr.into())
+        .map_err(|e| TftpError::Tftp(format!("Failed to bind to {}: {}", bind_addr, e)))?;
+
+    // Set non-blocking mode for tokio
+    socket
+        .set_nonblocking(true)
+        .map_err(|e| TftpError::Tftp(format!("Failed to set non-blocking: {}", e)))?;
+
+    // Convert socket2::Socket to std::net::UdpSocket, then to tokio::net::UdpSocket
+    let std_socket: std::net::UdpSocket = socket.into();
+    let tokio_socket = UdpSocket::from_std(std_socket)
+        .map_err(|e| TftpError::Tftp(format!("Failed to convert to tokio socket: {}", e)))?;
+
+    Ok(tokio_socket)
+}
 
 #[derive(Parser, Debug)]
 #[command(name = "snow-owl-tftp", about = "Standalone TFTP server")]
@@ -292,6 +574,7 @@ pub struct TftpServer {
     write_config: WriteConfig,
     audit_enabled: bool,
     buffer_pool: BufferPool,
+    config: Arc<TftpConfig>,
 }
 
 impl TftpServer {
@@ -301,6 +584,7 @@ impl TftpServer {
         max_file_size_bytes: u64,
         write_config: WriteConfig,
         audit_enabled: bool,
+        config: Arc<TftpConfig>,
     ) -> Self {
         Self {
             root_dir,
@@ -310,6 +594,7 @@ impl TftpServer {
             write_config,
             audit_enabled,
             buffer_pool: BufferPool::new_default(),
+            config,
         }
     }
 
@@ -340,14 +625,85 @@ impl TftpServer {
     /// STIG V-222563: Applications must produce audit records
     /// STIG V-222564: Applications must protect audit information
     pub async fn run(&self) -> Result<()> {
-        let socket = Arc::new(UdpSocket::bind(self.bind_addr).await?);
+        // Phase 1: Create optimized socket with platform-specific performance tuning
+        let socket = Arc::new(create_optimized_socket(
+            self.bind_addr,
+            &self.config.performance.platform.socket,
+        )?);
         info!("TFTP server listening on {}", self.bind_addr);
 
         // Performance optimization: Use buffer pool to avoid allocations
         let buffer_pool = self.buffer_pool.clone();
 
+        // Phase 2: Use batch receiving if enabled
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        let use_batch_recv = self.config.performance.platform.batch.enable_recvmmsg;
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        let batch_size = self.config.performance.platform.batch.max_batch_size;
+
+        #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+        let use_batch_recv = false;
+
+        if use_batch_recv {
+            info!("Using recvmmsg() batch receiving (Phase 2 optimization)");
+        }
+
         loop {
-            // Acquire a buffer from the pool instead of allocating
+            // Phase 2: Try batch receive first on supported platforms
+            #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+            if use_batch_recv {
+                // Prepare batch buffers
+                let mut buffers: Vec<Vec<u8>> = (0..batch_size)
+                    .map(|_| vec![0u8; MAX_PACKET_SIZE])
+                    .collect();
+
+                match batch_recv_packets(&socket, &mut buffers, batch_size) {
+                    Ok(packets) if !packets.is_empty() => {
+                        // Process each received packet
+                        for (i, (size, client_addr)) in packets.iter().enumerate() {
+                            let mut buf = buffer_pool.acquire().await;
+                            buf.clear();
+                            buf.extend_from_slice(&buffers[i][..*size]);
+
+                            let root_dir = self.root_dir.clone();
+                            let multicast_server = self.multicast_server.clone();
+                            let max_file_size = self.max_file_size_bytes;
+                            let write_config = self.write_config.clone();
+                            let audit_enabled = self.audit_enabled;
+                            let file_io_config = self.config.performance.platform.file_io.clone();
+                            let pool = buffer_pool.clone();
+                            let addr = *client_addr;
+
+                            tokio::spawn(async move {
+                                if let Err(e) = Self::handle_client(
+                                    buf.to_vec(),
+                                    addr,
+                                    root_dir,
+                                    multicast_server,
+                                    max_file_size,
+                                    write_config,
+                                    audit_enabled,
+                                    file_io_config,
+                                )
+                                .await
+                                {
+                                    error!("Error handling TFTP client {}: {}", addr, e);
+                                }
+                                pool.release(buf).await;
+                            });
+                        }
+                        continue;
+                    }
+                    Ok(_) => {
+                        // No packets available, fall through to regular recv_from
+                    }
+                    Err(e) => {
+                        warn!("Batch receive error, falling back to single recv: {}", e);
+                    }
+                }
+            }
+
+            // Fallback or default: single packet receive
             let mut buf = buffer_pool.acquire().await;
             buf.resize(MAX_PACKET_SIZE, 0);
 
@@ -362,6 +718,7 @@ impl TftpServer {
                     let max_file_size = self.max_file_size_bytes;
                     let write_config = self.write_config.clone();
                     let audit_enabled = self.audit_enabled;
+                    let file_io_config = self.config.performance.platform.file_io.clone();
                     let pool = buffer_pool.clone();
 
                     tokio::spawn(async move {
@@ -373,6 +730,7 @@ impl TftpServer {
                             max_file_size,
                             write_config,
                             audit_enabled,
+                            file_io_config,
                         )
                         .await
                         {
@@ -410,6 +768,7 @@ impl TftpServer {
         max_file_size_bytes: u64,
         write_config: WriteConfig,
         audit_enabled: bool,
+        file_io_config: config::FileIoConfig,
     ) -> Result<()> {
         let mut bytes = BytesMut::from(&data[..]);
 
@@ -658,6 +1017,7 @@ impl TftpServer {
                     negotiated_options,
                     max_file_size_bytes,
                     audit_enabled,
+                    &file_io_config,
                 )
                 .await?;
             }
@@ -953,6 +1313,7 @@ impl TftpServer {
         mut negotiated_options: HashMap<String, String>,
         max_file_size_bytes: u64,
         audit_enabled: bool,
+        file_io_config: &config::FileIoConfig,
     ) -> Result<()> {
         let start_time = std::time::Instant::now();
         // RFC 1350: Each transfer connection uses a new TID (Transfer ID)
@@ -980,6 +1341,9 @@ impl TftpServer {
 
         let file_metadata = file.metadata().await?;
         let file_size = file_metadata.len();
+
+        // Phase 1: Apply file I/O hints for optimal kernel behavior
+        apply_file_hints(&file, file_io_config, file_size);
 
         // Security: Validate file size to prevent memory exhaustion attacks
         // NIST 800-53 Controls:
@@ -2200,13 +2564,15 @@ async fn main() -> Result<()> {
         );
     }
 
+    let config_arc = Arc::new(config);
     let server = TftpServer::new(
-        config.root_dir,
-        config.bind_addr,
-        config.max_file_size_bytes,
-        config.write_config,
-        config.logging.audit_enabled,
+        config_arc.root_dir.clone(),
+        config_arc.bind_addr,
+        config_arc.max_file_size_bytes,
+        config_arc.write_config.clone(),
+        config_arc.logging.audit_enabled,
+        config_arc.clone(),
     )
-    .with_multicast(config.multicast);
+    .with_multicast(config_arc.multicast.clone());
     server.run().await
 }

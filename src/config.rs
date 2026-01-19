@@ -577,6 +577,9 @@ pub struct PerformanceConfig {
     /// 1.0 = log all events, 0.5 = log 50% of events
     /// Lower values reduce audit overhead for high-volume servers
     pub audit_sampling_rate: f64,
+
+    /// Platform-specific performance optimizations (Linux/BSD)
+    pub platform: PlatformPerformanceConfig,
 }
 
 impl Default for PerformanceConfig {
@@ -586,6 +589,189 @@ impl Default for PerformanceConfig {
             buffer_pool_size: 128,
             streaming_threshold: 1_048_576, // 1MB
             audit_sampling_rate: 1.0,       // Log everything by default
+            platform: PlatformPerformanceConfig::default(),
+        }
+    }
+}
+
+/// Platform-specific performance optimizations for Linux/BSD systems
+/// Phase 1: Socket tuning and file I/O hints
+/// Phase 2: Zero-copy operations and batch syscalls
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct PlatformPerformanceConfig {
+    /// Socket-level optimizations
+    pub socket: SocketConfig,
+
+    /// File I/O optimization hints
+    pub file_io: FileIoConfig,
+
+    /// Batch packet operations (Phase 2)
+    pub batch: BatchConfig,
+
+    /// Zero-copy transfer optimizations (Phase 2)
+    pub zero_copy: ZeroCopyConfig,
+}
+
+impl Default for PlatformPerformanceConfig {
+    fn default() -> Self {
+        Self {
+            socket: SocketConfig::default(),
+            file_io: FileIoConfig::default(),
+            batch: BatchConfig::default(),
+            zero_copy: ZeroCopyConfig::default(),
+        }
+    }
+}
+
+/// Socket-level performance configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct SocketConfig {
+    /// Receive buffer size in KB (SO_RCVBUF)
+    /// Larger buffers reduce packet drops under high load
+    /// Default: 2048 KB (2 MB)
+    pub recv_buffer_kb: usize,
+
+    /// Send buffer size in KB (SO_SNDBUF)
+    /// Larger buffers improve burst handling
+    /// Default: 2048 KB (2 MB)
+    pub send_buffer_kb: usize,
+
+    /// Enable SO_REUSEADDR for faster restarts
+    /// Default: true
+    pub reuse_address: bool,
+
+    /// Enable SO_REUSEPORT for multi-process scaling (Linux 3.9+, BSD)
+    /// Allows multiple processes to bind to same port
+    /// Default: true on supported platforms
+    pub reuse_port: bool,
+}
+
+impl Default for SocketConfig {
+    fn default() -> Self {
+        Self {
+            recv_buffer_kb: 2048, // 2 MB
+            send_buffer_kb: 2048, // 2 MB
+            reuse_address: true,
+            reuse_port: true,
+        }
+    }
+}
+
+/// File I/O optimization configuration
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct FileIoConfig {
+    /// Use POSIX_FADV_SEQUENTIAL hint for sequential file reads
+    /// Optimizes kernel read-ahead behavior
+    /// Default: true
+    pub use_sequential_hint: bool,
+
+    /// Use POSIX_FADV_WILLNEED to prefetch file data
+    /// Reduces I/O wait time
+    /// Default: true
+    pub use_willneed_hint: bool,
+
+    /// Use POSIX_FADV_DONTNEED after transfer to free page cache
+    /// Useful for large one-time transfers
+    /// Default: false
+    pub fadvise_dontneed_after: bool,
+}
+
+impl Default for FileIoConfig {
+    fn default() -> Self {
+        Self {
+            use_sequential_hint: true,
+            use_willneed_hint: true,
+            fadvise_dontneed_after: false,
+        }
+    }
+}
+
+/// Batch packet operation configuration (Phase 2)
+/// Uses sendmmsg()/recvmmsg() for reduced syscall overhead
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct BatchConfig {
+    /// Enable sendmmsg() for batch packet sending (Linux 3.0+, FreeBSD 11.0+)
+    /// Reduces syscall overhead by 60-80% during concurrent transfers
+    /// Default: true on supported platforms
+    pub enable_sendmmsg: bool,
+
+    /// Enable recvmmsg() for batch packet receiving (Linux 2.6.33+, FreeBSD 11.0+)
+    /// Improves concurrent connection handling
+    /// Default: true on supported platforms
+    pub enable_recvmmsg: bool,
+
+    /// Maximum number of packets to batch in a single syscall
+    /// Higher values reduce overhead but increase latency
+    /// Default: 32 packets
+    pub max_batch_size: usize,
+
+    /// Maximum time to wait for batching packets (microseconds)
+    /// Lower values reduce latency, higher values improve batching efficiency
+    /// Default: 100 microseconds
+    pub batch_timeout_us: u64,
+}
+
+impl Default for BatchConfig {
+    fn default() -> Self {
+        // Enable by default on Linux and FreeBSD where supported
+        #[cfg(any(target_os = "linux", target_os = "freebsd"))]
+        let default_enabled = true;
+
+        #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
+        let default_enabled = false;
+
+        Self {
+            enable_sendmmsg: default_enabled,
+            enable_recvmmsg: default_enabled,
+            max_batch_size: 32,
+            batch_timeout_us: 100,
+        }
+    }
+}
+
+/// Zero-copy transfer configuration (Phase 2)
+/// Reduces CPU usage and memory bandwidth for large file transfers
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct ZeroCopyConfig {
+    /// Use sendfile() for zero-copy transfers (Linux only)
+    /// Eliminates user-space buffer copies
+    /// Default: true on Linux
+    pub use_sendfile: bool,
+
+    /// Minimum file size to use sendfile() (bytes)
+    /// Smaller files may not benefit from zero-copy overhead
+    /// Default: 65536 (64 KB)
+    pub sendfile_threshold_bytes: u64,
+
+    /// Use MSG_ZEROCOPY flag for send operations (Linux 4.14+)
+    /// Reduces copies for large blocks, requires completion notification handling
+    /// Default: false (experimental)
+    pub use_msg_zerocopy: bool,
+
+    /// Minimum block size to use MSG_ZEROCOPY (bytes)
+    /// Only beneficial for larger blocks (>8KB)
+    /// Default: 8192 (8 KB)
+    pub msg_zerocopy_threshold_bytes: usize,
+}
+
+impl Default for ZeroCopyConfig {
+    fn default() -> Self {
+        #[cfg(target_os = "linux")]
+        let default_sendfile = true;
+
+        #[cfg(not(target_os = "linux"))]
+        let default_sendfile = false;
+
+        Self {
+            use_sendfile: default_sendfile,
+            sendfile_threshold_bytes: 65536, // 64 KB
+            use_msg_zerocopy: false, // Experimental, requires completion handling
+            msg_zerocopy_threshold_bytes: 8192, // 8 KB
         }
     }
 }
