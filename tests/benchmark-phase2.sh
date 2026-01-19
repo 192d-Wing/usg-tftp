@@ -14,7 +14,7 @@ NC='\033[0m' # No Color
 
 # Configuration
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 TFTP_ROOT="$SCRIPT_DIR"
 TEST_DIR="$TFTP_ROOT/benchmark-test"
 RESULTS_DIR="$TEST_DIR/results"
