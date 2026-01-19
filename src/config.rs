@@ -594,7 +594,7 @@ impl Default for PerformanceConfig {
             default_block_size: 8192, // 8KB for better throughput
             buffer_pool_size: 128,
             streaming_threshold: 1_048_576, // 1MB
-            audit_sampling_rate: 1.0, // Log everything by default
+            audit_sampling_rate: 1.0,       // Log everything by default
         }
     }
 }

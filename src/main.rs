@@ -487,7 +487,8 @@ impl TftpServer {
                             match value.parse::<usize>() {
                                 Ok(size) if (8..=MAX_BLOCK_SIZE).contains(&size) => {
                                     options.block_size = size;
-                                    negotiated_options.insert("blksize".to_string(), size.to_string());
+                                    negotiated_options
+                                        .insert("blksize".to_string(), size.to_string());
                                 }
                                 Ok(size) => {
                                     // Invalid size - log and omit from OACK per RFC 2347
@@ -556,7 +557,10 @@ impl TftpServer {
                         }
                         _ => {
                             // RFC 2347: Unknown options are silently ignored
-                            debug!("Client {} sent unknown option '{}', ignoring per RFC 2347", client_addr, name);
+                            debug!(
+                                "Client {} sent unknown option '{}', ignoring per RFC 2347",
+                                client_addr, name
+                            );
                         }
                     }
                 }
@@ -744,7 +748,8 @@ impl TftpServer {
                             match value.parse::<usize>() {
                                 Ok(size) if (8..=MAX_BLOCK_SIZE).contains(&size) => {
                                     options.block_size = size;
-                                    negotiated_options.insert("blksize".to_string(), size.to_string());
+                                    negotiated_options
+                                        .insert("blksize".to_string(), size.to_string());
                                 }
                                 Ok(size) => {
                                     // Invalid size - log and omit from OACK per RFC 2347
@@ -789,7 +794,8 @@ impl TftpServer {
                             match value.parse::<u64>() {
                                 Ok(size) => {
                                     options.transfer_size = Some(size);
-                                    negotiated_options.insert("tsize".to_string(), size.to_string());
+                                    negotiated_options
+                                        .insert("tsize".to_string(), size.to_string());
                                 }
                                 Err(_) => {
                                     warn!(
@@ -801,7 +807,10 @@ impl TftpServer {
                         }
                         _ => {
                             // RFC 2347: Unknown options are silently ignored
-                            debug!("Client {} sent unknown option '{}', ignoring per RFC 2347", client_addr, name);
+                            debug!(
+                                "Client {} sent unknown option '{}', ignoring per RFC 2347",
+                                client_addr, name
+                            );
                         }
                     }
                 }
@@ -1145,16 +1154,29 @@ impl TftpServer {
             let mut retries = 0;
             loop {
                 if retries >= MAX_RETRIES {
-                    error!("Max retries exceeded for block {} after {} attempts", block_num, MAX_RETRIES);
+                    error!(
+                        "Max retries exceeded for block {} after {} attempts",
+                        block_num, MAX_RETRIES
+                    );
                     return Ok(());
                 }
 
                 socket.send(&data_packet).await?;
 
-                match Self::wait_for_ack_with_duplicate_handling(socket, block_num, timeout, &data_packet).await {
+                match Self::wait_for_ack_with_duplicate_handling(
+                    socket,
+                    block_num,
+                    timeout,
+                    &data_packet,
+                )
+                .await
+                {
                     Ok(true) => break,
                     Ok(false) => {
-                        debug!("Duplicate ACK detected for block {}, retransmitting", block_num);
+                        debug!(
+                            "Duplicate ACK detected for block {}, retransmitting",
+                            block_num
+                        );
                         retries += 1;
                         continue;
                     }
@@ -1168,7 +1190,11 @@ impl TftpServer {
             offset += bytes_to_send;
 
             if bytes_to_send < block_size {
-                debug!("Transfer complete: {} blocks sent ({} bytes)", block_num, file_data.len());
+                debug!(
+                    "Transfer complete: {} blocks sent ({} bytes)",
+                    block_num,
+                    file_data.len()
+                );
                 if audit_enabled {
                     let duration_ms = start_time.elapsed().as_millis() as u64;
                     AuditLogger::transfer_completed(
@@ -1242,7 +1268,9 @@ impl TftpServer {
                 // For NETASCII, convert this chunk
                 // Note: This is chunked processing for large NETASCII files
                 netascii_buffer.clear();
-                netascii_buffer.extend_from_slice(TransferMode::convert_to_netascii(&read_buffer[..bytes_read]).as_slice());
+                netascii_buffer.extend_from_slice(
+                    TransferMode::convert_to_netascii(&read_buffer[..bytes_read]).as_slice(),
+                );
                 &netascii_buffer[..]
             } else {
                 &read_buffer[..bytes_read]
@@ -1256,16 +1284,29 @@ impl TftpServer {
             let mut retries = 0;
             loop {
                 if retries >= MAX_RETRIES {
-                    error!("Max retries exceeded for block {} after {} attempts", block_num, MAX_RETRIES);
+                    error!(
+                        "Max retries exceeded for block {} after {} attempts",
+                        block_num, MAX_RETRIES
+                    );
                     return Ok(());
                 }
 
                 socket.send(&data_packet).await?;
 
-                match Self::wait_for_ack_with_duplicate_handling(socket, block_num, timeout, &data_packet).await {
+                match Self::wait_for_ack_with_duplicate_handling(
+                    socket,
+                    block_num,
+                    timeout,
+                    &data_packet,
+                )
+                .await
+                {
                     Ok(true) => break,
                     Ok(false) => {
-                        debug!("Duplicate ACK detected for block {}, retransmitting", block_num);
+                        debug!(
+                            "Duplicate ACK detected for block {}, retransmitting",
+                            block_num
+                        );
                         retries += 1;
                         continue;
                     }
@@ -1283,7 +1324,10 @@ impl TftpServer {
             let is_last_block = bytes_read < block_size;
 
             if is_last_block {
-                debug!("Transfer complete: {} blocks sent ({} bytes, streaming mode)", block_num, bytes_transferred);
+                debug!(
+                    "Transfer complete: {} blocks sent ({} bytes, streaming mode)",
+                    block_num, bytes_transferred
+                );
                 if audit_enabled {
                     let duration_ms = start_time.elapsed().as_millis() as u64;
                     AuditLogger::transfer_completed(
