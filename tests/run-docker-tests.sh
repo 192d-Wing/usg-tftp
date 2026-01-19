@@ -33,13 +33,18 @@ echo -e "${BLUE}Building Docker image...${NC}"
 cd "$(dirname "$0")"
 
 # Build the Docker image
-docker build -t snow-owl-tftp-test -f Dockerfile ../../.. || {
-    echo -e "${RED}ERROR: Failed to build Docker image${NC}"
+docker build -t snow-owl-tftp-test -f Dockerfile.integration ../../.. || {
+    echo -e "${RED}ERROR: Failed to build Docker intergration image${NC}"
+    exit 1
+}
+
+docker build -t snow-owl-tftp-benchmarks -f Dockerfile.bench ../../.. || {
+    echo -e "${RED}ERROR: Failed to build Docker benchmark image${NC}"
     exit 1
 }
 
 echo ""
-echo -e "${GREEN}Docker image built successfully${NC}"
+echo -e "${GREEN}Docker images built successfully${NC}"
 echo ""
 echo -e "${BLUE}Running integration tests in Docker container...${NC}"
 echo ""
@@ -52,9 +57,14 @@ EXIT_CODE=$?
 
 echo ""
 if [ $EXIT_CODE -eq 0 ]; then
-    echo -e "${GREEN}All tests passed in Docker container!${NC}"
+    echo -e "${GREEN}All integration tests passed in Docker container!${NC}"
 else
     echo -e "${RED}Tests failed with exit code: $EXIT_CODE${NC}"
 fi
 
-exit $EXIT_CODE
+echo ""
+echo -e "${BLUE}Running benchmark tests in Docker container...${NC}"
+echo ""
+
+# Run the tests in a container
+docker run --rm snow-owl-tftp-benchmarks
