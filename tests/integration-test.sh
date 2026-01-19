@@ -275,6 +275,9 @@ put upload.txt
 quit
 EOF
 
+    # Wait for server to complete async file write operations
+    sleep 1
+
     if [ ! -f "$TEST_DIR/root/upload.txt" ]; then
         echo "File not uploaded to server"
         return 1
@@ -300,6 +303,9 @@ mode octet
 put allowed.txt
 quit
 EOF
+
+    # Wait for server to complete async file write operations
+    sleep 1
 
     if [ ! -f "$TEST_DIR/root/allowed.txt" ]; then
         echo "Allowed file was not uploaded"
