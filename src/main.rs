@@ -1590,8 +1590,8 @@ impl TftpServer {
 
         // RFC 2349: Validate transfer size if client specified expected size
         // Check if actual received size matches the tsize option (if provided and non-zero)
-        if let Some(expected_size) = options.transfer_size {
-            if expected_size > 0 && final_data.len() as u64 != expected_size {
+        if let Some(expected_size) = options.transfer_size
+            && expected_size > 0 && final_data.len() as u64 != expected_size {
                 warn!(
                     "Transfer size mismatch: expected {} bytes, received {} bytes",
                     expected_size,
@@ -1619,7 +1619,6 @@ impl TftpServer {
                     final_data.len()
                 );
             }
-        }
 
         // Write file to disk
         match Self::write_file_safely(&file_path, &final_data).await {
@@ -1743,11 +1742,10 @@ impl TftpServer {
         // Check against all allowed patterns
         for pattern in &write_config.allowed_patterns {
             // Use glob pattern matching
-            if let Ok(glob_pattern) = glob::Pattern::new(pattern) {
-                if glob_pattern.matches(path_str) {
+            if let Ok(glob_pattern) = glob::Pattern::new(pattern)
+                && glob_pattern.matches(path_str) {
                     return true;
                 }
-            }
         }
 
         false
@@ -1818,20 +1816,20 @@ impl TftpServer {
                 // RFC 1350: Check ACK block number
                 if ack_block == expected_block {
                     // Correct ACK
-                    return Ok(true);
+                    Ok(true)
                 } else if ack_block < expected_block {
                     // Duplicate ACK - indicates packet loss, retransmit
                     debug!(
                         "Received duplicate ACK for block {} (expected {})",
                         ack_block, expected_block
                     );
-                    return Ok(false);
+                    Ok(false)
                 } else {
                     warn!(
                         "ACK mismatch: expected {}, got {}",
                         expected_block, ack_block
                     );
-                    return Err(TftpError::Tftp("ACK out of sequence".to_string()));
+                    Err(TftpError::Tftp("ACK out of sequence".to_string()))
                 }
             }
             Ok(Err(e)) => {

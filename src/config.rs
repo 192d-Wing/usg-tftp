@@ -15,6 +15,7 @@ use crate::error::{Result, TftpError};
 /// STIG V-222602: Applications must enforce access restrictions
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default)]
+#[derive(Default)]
 pub struct WriteConfig {
     /// Enable write operations (disabled by default for security)
     pub enabled: bool,
@@ -552,15 +553,6 @@ fn default_retransmit_timeout() -> u64 {
     5
 }
 
-impl Default for WriteConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            allow_overwrite: false,
-            allowed_patterns: Vec::new(),
-        }
-    }
-}
 
 /// Performance tuning configuration
 ///
