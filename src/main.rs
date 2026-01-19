@@ -1,12 +1,14 @@
+mod audit;
 mod config;
 mod error;
 mod multicast;
 
+use audit::AuditLogger;
 use bytes::{Buf, BufMut, BytesMut};
 use clap::Parser;
 use config::{
-    default_multicast_addr_for_version, load_config, validate_config, write_config,
-    MulticastConfig, MulticastIpVersion, TftpConfig,
+    LogFormat, MulticastConfig, MulticastIpVersion, TftpConfig, default_multicast_addr_for_version,
+    load_config, validate_config, write_config,
 };
 use error::{Result, TftpError};
 use multicast::MulticastTftpServer;
@@ -240,15 +242,22 @@ pub struct TftpServer {
     bind_addr: SocketAddr,
     multicast_server: Option<Arc<MulticastTftpServer>>,
     max_file_size_bytes: u64,
+    audit_enabled: bool,
 }
 
 impl TftpServer {
-    pub fn new(root_dir: PathBuf, bind_addr: SocketAddr, max_file_size_bytes: u64) -> Self {
+    pub fn new(
+        root_dir: PathBuf,
+        bind_addr: SocketAddr,
+        max_file_size_bytes: u64,
+        audit_enabled: bool,
+    ) -> Self {
         Self {
             root_dir,
             bind_addr,
             multicast_server: None,
             max_file_size_bytes,
+            audit_enabled,
         }
     }
 
@@ -261,7 +270,8 @@ impl TftpServer {
     /// - SC-5: Denial of Service Protection (multicast efficiency)
     pub fn with_multicast(mut self, config: MulticastConfig) -> Self {
         if config.enabled {
-            let multicast_server = MulticastTftpServer::new(config, self.root_dir.clone());
+            let multicast_server =
+                MulticastTftpServer::new(config, self.root_dir.clone(), self.audit_enabled);
             self.multicast_server = Some(Arc::new(multicast_server));
             info!("Multicast TFTP support enabled");
         }
@@ -291,6 +301,7 @@ impl TftpServer {
                     let root_dir = self.root_dir.clone();
                     let multicast_server = self.multicast_server.clone();
                     let max_file_size = self.max_file_size_bytes;
+                    let audit_enabled = self.audit_enabled;
 
                     tokio::spawn(async move {
                         if let Err(e) = Self::handle_client(
@@ -299,6 +310,7 @@ impl TftpServer {
                             root_dir,
                             multicast_server,
                             max_file_size,
+                            audit_enabled,
                         )
                         .await
                         {
@@ -330,6 +342,7 @@ impl TftpServer {
         root_dir: PathBuf,
         multicast_server: Option<Arc<MulticastTftpServer>>,
         max_file_size_bytes: u64,
+        audit_enabled: bool,
     ) -> Result<()> {
         let mut bytes = BytesMut::from(&data[..]);
 
@@ -404,20 +417,21 @@ impl TftpServer {
                         "blksize" => {
                             // RFC 2348 - Block Size Option
                             if let Ok(size) = value.parse::<usize>()
-                                && (8..=MAX_BLOCK_SIZE).contains(&size) {
-                                    options.block_size = size;
-                                    negotiated_options
-                                        .insert("blksize".to_string(), size.to_string());
-                                }
+                                && (8..=MAX_BLOCK_SIZE).contains(&size)
+                            {
+                                options.block_size = size;
+                                negotiated_options.insert("blksize".to_string(), size.to_string());
+                            }
                         }
                         "timeout" => {
                             // RFC 2349 - Timeout Interval Option
                             if let Ok(timeout) = value.parse::<u64>()
-                                && (1..=255).contains(&timeout) {
-                                    options.timeout = timeout;
-                                    negotiated_options
-                                        .insert("timeout".to_string(), timeout.to_string());
-                                }
+                                && (1..=255).contains(&timeout)
+                            {
+                                options.timeout = timeout;
+                                negotiated_options
+                                    .insert("timeout".to_string(), timeout.to_string());
+                            }
                         }
                         "tsize" => {
                             // RFC 2349 - Transfer Size Option
@@ -442,6 +456,16 @@ impl TftpServer {
                     "RRQ from {}: {} (mode: {}, options: {:?}, multicast: {})",
                     client_addr, filename, mode_str, negotiated_options, multicast_requested
                 );
+
+                // Audit log: Read request received
+                if audit_enabled {
+                    AuditLogger::read_request(
+                        client_addr,
+                        &filename,
+                        &mode_str,
+                        serde_json::to_value(&negotiated_options).unwrap_or(serde_json::json!({})),
+                    );
+                }
 
                 // RFC 2090: Handle multicast request if enabled and requested
                 if multicast_requested {
@@ -485,6 +509,19 @@ impl TftpServer {
                 let file_path = match Self::validate_and_resolve_path(&root_dir, &filename) {
                     Ok(path) => path,
                     Err(e) => {
+                        // Audit log: Path validation failure
+                        if audit_enabled {
+                            if filename.contains("..") {
+                                AuditLogger::path_traversal_attempt(
+                                    client_addr,
+                                    &filename,
+                                    "directory traversal attempt",
+                                );
+                            } else {
+                                AuditLogger::access_violation(client_addr, &filename, &e.to_string());
+                            }
+                        }
+
                         Self::send_error(
                             client_addr,
                             TftpErrorCode::AccessViolation,
@@ -502,11 +539,19 @@ impl TftpServer {
                     options,
                     negotiated_options,
                     max_file_size_bytes,
+                    audit_enabled,
                 )
                 .await?;
             }
             TftpOpcode::Wrq => {
+                let filename = Self::parse_string(&mut bytes).unwrap_or_default();
                 warn!("WRQ from {}: write not supported", client_addr);
+
+                // Audit log: Write request denied
+                if audit_enabled {
+                    AuditLogger::write_request_denied(client_addr, &filename);
+                }
+
                 Self::send_error(
                     client_addr,
                     TftpErrorCode::AccessViolation,
@@ -541,7 +586,9 @@ impl TftpServer {
         options: TftpOptions,
         mut negotiated_options: HashMap<String, String>,
         max_file_size_bytes: u64,
+        audit_enabled: bool,
     ) -> Result<()> {
+        let start_time = std::time::Instant::now();
         // RFC 1350: Each transfer connection uses a new TID (Transfer ID)
         let socket = UdpSocket::bind("0.0.0.0:0").await?;
         socket.connect(client_addr).await?;
@@ -550,6 +597,15 @@ impl TftpServer {
         let mut file = match File::open(&file_path).await {
             Ok(f) => f,
             Err(_) => {
+                // Audit log: File not found
+                if audit_enabled {
+                    AuditLogger::read_denied(
+                        client_addr,
+                        &file_path.display().to_string(),
+                        "File not found",
+                    );
+                }
+
                 Self::send_error_on_socket(&socket, TftpErrorCode::FileNotFound, "File not found")
                     .await?;
                 return Ok(());
@@ -573,8 +629,35 @@ impl TftpServer {
                 max_file_size_bytes,
                 file_path.display()
             );
+
+            // Audit log: File size limit exceeded
+            if audit_enabled {
+                AuditLogger::file_size_limit_exceeded(
+                    client_addr,
+                    &file_path.display().to_string(),
+                    file_size,
+                    max_file_size_bytes,
+                );
+            }
+
             Self::send_error_on_socket(&socket, TftpErrorCode::DiskFull, "File too large").await?;
             return Ok(());
+        }
+
+        // Audit log: Transfer started
+        if audit_enabled {
+            let mode_str = match mode {
+                TransferMode::Netascii => "netascii",
+                TransferMode::Octet => "octet",
+                TransferMode::Mail => "mail",
+            };
+            AuditLogger::transfer_started(
+                client_addr,
+                &file_path.display().to_string(),
+                file_size,
+                mode_str,
+                options.block_size,
+            );
         }
 
         // RFC 2349: Update tsize option with actual file size
@@ -664,6 +747,19 @@ impl TftpServer {
                     file_data.len(),
                     mode
                 );
+
+                // Audit log: Transfer completed
+                if audit_enabled {
+                    let duration_ms = start_time.elapsed().as_millis() as u64;
+                    AuditLogger::transfer_completed(
+                        client_addr,
+                        &file_path.display().to_string(),
+                        file_data.len() as u64,
+                        block_num,
+                        duration_ms,
+                    );
+                }
+
                 break;
             }
 
@@ -682,6 +778,18 @@ impl TftpServer {
             Self::wait_for_ack(&socket, 1, timeout).await?;
 
             debug!("Transfer complete: empty file (mode: {:?})", mode);
+
+            // Audit log: Empty file transfer completed
+            if audit_enabled {
+                let duration_ms = start_time.elapsed().as_millis() as u64;
+                AuditLogger::transfer_completed(
+                    client_addr,
+                    &file_path.display().to_string(),
+                    0,
+                    1,
+                    duration_ms,
+                );
+            }
         }
 
         Ok(())
@@ -730,7 +838,8 @@ impl TftpServer {
                     // Check for ERROR packet
                     if opcode == TftpOpcode::Error as u16 {
                         let error_code = ack_bytes.get_u16();
-                        let error_msg: String = Self::parse_string(&mut ack_bytes).unwrap_or_default();
+                        let error_msg: String =
+                            Self::parse_string(&mut ack_bytes).unwrap_or_default();
                         return Err(TftpError::Tftp(format!(
                             "Client sent error {}: {}",
                             error_code, error_msg
@@ -896,9 +1005,10 @@ impl TftpServer {
             // File doesn't exist yet - check that the parent is within bounds
             if let Some(parent) = file_path.parent()
                 && let Ok(canonical_parent) = parent.canonicalize()
-                    && !canonical_parent.starts_with(&canonical_root) {
-                        return Err(TftpError::Tftp("Access denied".to_string()));
-                    }
+                && !canonical_parent.starts_with(&canonical_root)
+            {
+                return Err(TftpError::Tftp("Access denied".to_string()));
+            }
         }
 
         Ok(file_path)
@@ -998,6 +1108,9 @@ async fn main() -> Result<()> {
 
     validate_config(&config, true)?;
 
+    // Initialize logging with JSON support for SIEM integration
+    // NIST 800-53 AU-9: Protection of Audit Information
+    // NIST 800-53 AU-12: Audit Generation
     let _log_guard = if let Some(ref log_file) = config.logging.file {
         let dir = match log_file.parent() {
             Some(path) => path,
@@ -1010,24 +1123,55 @@ async fn main() -> Result<()> {
         let file_appender = tracing_appender::rolling::never(dir, file_name);
         let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::new(config.logging.level.clone()))
-            .with_writer(non_blocking)
-            .init();
+        match config.logging.format {
+            LogFormat::Json => {
+                tracing_subscriber::fmt()
+                    .json()
+                    .with_env_filter(EnvFilter::new(config.logging.level.clone()))
+                    .with_writer(non_blocking)
+                    .init();
+            }
+            LogFormat::Text => {
+                tracing_subscriber::fmt()
+                    .with_env_filter(EnvFilter::new(config.logging.level.clone()))
+                    .with_writer(non_blocking)
+                    .init();
+            }
+        }
 
         Some(guard)
     } else {
-        tracing_subscriber::fmt()
-            .with_env_filter(EnvFilter::new(config.logging.level.clone()))
-            .init();
+        match config.logging.format {
+            LogFormat::Json => {
+                tracing_subscriber::fmt()
+                    .json()
+                    .with_env_filter(EnvFilter::new(config.logging.level.clone()))
+                    .init();
+            }
+            LogFormat::Text => {
+                tracing_subscriber::fmt()
+                    .with_env_filter(EnvFilter::new(config.logging.level.clone()))
+                    .init();
+            }
+        }
 
         None
     };
+
+    // Audit log: Server startup
+    if config.logging.audit_enabled {
+        AuditLogger::server_started(
+            &config.bind_addr.to_string(),
+            &config.root_dir.display().to_string(),
+            config.multicast.enabled,
+        );
+    }
 
     let server = TftpServer::new(
         config.root_dir,
         config.bind_addr,
         config.max_file_size_bytes,
+        config.logging.audit_enabled,
     )
     .with_multicast(config.multicast);
     server.run().await

@@ -35,14 +35,18 @@ pub struct LoggingConfig {
     pub level: String,
     pub format: LogFormat,
     pub file: Option<PathBuf>,
+    /// Enable structured audit logging for SIEM integration
+    /// When enabled, all security-relevant events are logged as structured JSON
+    pub audit_enabled: bool,
 }
 
 impl Default for LoggingConfig {
     fn default() -> Self {
         Self {
             level: "info".to_string(),
-            format: LogFormat::Text,
-            file: None,
+            format: LogFormat::Json,
+            file: Some(PathBuf::from("/var/log/snow-owl/tftp-audit.json")),
+            audit_enabled: true,
         }
     }
 }
@@ -50,7 +54,10 @@ impl Default for LoggingConfig {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum LogFormat {
+    /// Plain text logging for human readability
     Text,
+    /// JSON structured logging for SIEM integration
+    /// All log entries are formatted as JSON for easy parsing by log aggregators
     Json,
 }
 
@@ -169,13 +176,12 @@ pub(crate) fn validate_config(config: &TftpConfig, validate_bind: bool) -> Resul
         ));
     }
 
-    if validate_bind
-        && let Err(e) = std::net::UdpSocket::bind(config.bind_addr) {
-            return Err(TftpError::Tftp(format!(
-                "bind_addr is not available: {}",
-                e
-            )));
-        }
+    if validate_bind && let Err(e) = std::net::UdpSocket::bind(config.bind_addr) {
+        return Err(TftpError::Tftp(format!(
+            "bind_addr is not available: {}",
+            e
+        )));
+    }
 
     if !(1024..=65535).contains(&config.multicast.multicast_port) {
         return Err(TftpError::Tftp(
@@ -326,8 +332,8 @@ bind_addr = "127.0.0.1:6969"
     }
 
     #[test]
-    fn rejects_logging_file_with_missing_parent(
-    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn rejects_logging_file_with_missing_parent()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = TftpConfig::default();
         config.root_dir = temp_dir("logfile")?;
         config.logging.file = Some(PathBuf::from("/nonexistent/snow-owl-tftp/log.txt"));
@@ -341,8 +347,8 @@ bind_addr = "127.0.0.1:6969"
     }
 
     #[test]
-    fn validates_bind_addr_availability_on_free_port(
-    ) -> std::result::Result<(), Box<dyn std::error::Error>> {
+    fn validates_bind_addr_availability_on_free_port()
+    -> std::result::Result<(), Box<dyn std::error::Error>> {
         let socket = std::net::UdpSocket::bind("127.0.0.1:0")?;
         let port = socket.local_addr()?.port();
         drop(socket);

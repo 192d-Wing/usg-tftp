@@ -59,46 +59,183 @@ The Snow-Owl TFTP server implements comprehensive security controls addressing:
 
 ### AU-2: Audit Events
 
-**Implementation**: Logging of all security-relevant events
+**Implementation**: Comprehensive structured audit logging with SIEM integration
 
 **Locations**:
 
-- `main.rs:271-279` - Main server loop audit controls
-- `main.rs:316-326` - Client request handling with audit
-- Throughout: `tracing::info!()`, `tracing::warn!()`, `tracing::error!()`
+- `audit.rs` - Complete audit event module with 20+ event types
+- `main.rs` - Audit logging throughout all TFTP operations
+- `multicast.rs` - Multicast session audit events
+- `config.rs:40` - `audit_enabled` configuration flag
 
 **Details**:
 
-- All client connections logged
-- Failed authentication/authorization logged
-- Configuration errors logged
-- File access attempts logged
+Comprehensive audit events for all security-relevant operations:
+- **Server lifecycle**: Startup, shutdown, configuration changes
+- **Client operations**: Connection initiation, read requests, denied access
+- **File transfers**: Started, completed, failed (with metrics)
+- **Security violations**: Path traversal attempts, symlink access, file size limits
+- **Protocol violations**: Invalid opcodes, write requests, unsupported modes
+- **Multicast sessions**: Session creation, client join/remove, completion
+- **Access control**: Authentication attempts, authorization failures
 
-**Evidence**: Use of structured tracing throughout codebase
+All events include:
+- ISO 8601 timestamp
+- Hostname/system identifier
+- Service name (snow-owl-tftp)
+- Severity level (info, warn, error)
+- Client address and port
+- Detailed contextual information
+- Optional correlation IDs
+
+**Evidence**:
+- `audit.rs:1-571` - Complete audit event catalog
+- `main.rs:460-467` - Read request audit logging
+- `main.rs:513-522` - Path violation audit logging
+- `multicast.rs:417-425` - Multicast client join audit logging
 
 ---
 
 ### AU-3: Content of Audit Records
 
-**Implementation**: Detailed audit records with relevant information
+**Implementation**: Structured JSON audit records with comprehensive context
 
 **Locations**:
 
-- `main.rs:275` - AU-3 control annotation
-- `main.rs:440` - Client address, filename, mode logged
-- `main.rs:572-577` - File size validation failures logged
+- `audit.rs:232-248` - CommonFields structure with required AU-3 fields
+- `audit.rs:13-230` - Detailed event structures with full context
+- `main.rs:1018-1051` - JSON logging format support
 
 **Details**:
-Audit records include:
 
-- Source IP address and port
-- Requested filename
-- Transfer mode (NETASCII/OCTET)
-- Negotiated options
-- File sizes
-- Failure reasons
+Each audit record includes NIST AU-3 required fields:
+- **Date and time**: ISO 8601 timestamp with timezone
+- **Type of event**: Structured event_type field (JSON tag)
+- **Subject identity**: Client address, username (when applicable)
+- **Outcome**: Success/failure status, error messages
+- **Additional information**: Event-specific context
 
-**Evidence**: Log messages include contextual information for forensics
+Event-specific audit data:
+- **File transfers**: Filename, size, mode, block size, duration, blocks sent
+- **Security violations**: Requested path, violation type, reason
+- **Multicast sessions**: Session ID, multicast group, port, client count
+- **Resource limits**: File size, max allowed, resource type
+
+**Format**: JSON-structured logs for SIEM parsing
+```json
+{
+  "event_type": "read_request",
+  "timestamp": "2026-01-18T10:30:45.123Z",
+  "hostname": "tftp-server-01",
+  "service": "snow-owl-tftp",
+  "severity": "info",
+  "client_addr": "192.168.1.100:54321",
+  "filename": "firmware.bin",
+  "mode": "octet",
+  "options": {"blksize": "1024", "timeout": "5"}
+}
+```
+
+**Evidence**:
+- `audit.rs:232-273` - CommonFields implementation
+- `audit.rs:276-337` - AuditEvent::log() structured logging
+- Log output includes all required AU-3 fields
+
+---
+
+### AU-6: Audit Review, Analysis, and Reporting
+
+**Implementation**: SIEM-compatible structured logging
+
+**Locations**:
+
+- `audit.rs` - JSON-serializable audit events
+- `config.rs:50-62` - LogFormat enum with JSON support
+- `main.rs:1018-1051` - JSON logging configuration
+
+**Details**:
+
+SIEM Integration Features:
+- **Structured JSON format**: All audit events serialize to JSON
+- **Consistent schema**: Tagged enum with common fields
+- **Log file output**: Configurable file-based logging
+- **Standard severity levels**: info, warn, error for filtering
+- **Correlation IDs**: Optional field for tracking related events
+
+Configuration example:
+```toml
+[logging]
+format = "json"  # Enable JSON structured logging
+file = "/var/log/snow-owl/tftp-audit.json"
+audit_enabled = true
+level = "info"
+```
+
+SIEM Integration:
+- Forward logs to Splunk, ELK, Datadog, or other SIEM platforms
+- Use log shippers (Filebeat, Fluentd, Vector) to collect JSON logs
+- Query by event_type, severity, client_addr, or any event field
+- Build dashboards for security monitoring and compliance reporting
+
+**Evidence**:
+- `audit.rs:4-5` - Serde JSON serialization support
+- `config.rs:54-62` - JSON log format configuration
+- `main.rs:1020-1024` - JSON logger initialization
+
+---
+
+### AU-9: Protection of Audit Information
+
+**Implementation**: Secure audit log storage and integrity
+
+**Locations**:
+
+- `config.rs:186-205` - Log file path validation
+- `main.rs:1001-1051` - Non-blocking log appender with guard
+- `audit.rs:276-295` - Error handling for audit failures
+
+**Details**:
+
+Audit log protection mechanisms:
+- **File permissions**: Logs protected by OS filesystem permissions
+- **Path validation**: Log file parent directory must exist and be writable
+- **Non-blocking writes**: Separate thread for log I/O prevents DoS
+- **Write guard**: RAII guard ensures logs are flushed on shutdown
+- **Error resilience**: Failed serialization doesn't crash server
+
+**Evidence**:
+- `config.rs:200-204` - Log file write validation
+- `main.rs:1010-1016` - Non-blocking appender with guard
+- `audit.rs:283-287` - Graceful error handling for serialization
+
+---
+
+### AU-12: Audit Generation
+
+**Implementation**: Automatic audit event generation throughout lifecycle
+
+**Locations**:
+
+- `audit.rs:276-295` - Automated event logging via AuditEvent::log()
+- `main.rs:1053-1060` - Server startup audit
+- Throughout codebase - Automatic audit calls at security boundaries
+
+**Details**:
+
+Automated audit generation for:
+- **All file access attempts**: Read requests, denials, completions
+- **All security violations**: Path traversal, access violations, symlinks
+- **All protocol errors**: Invalid opcodes, write requests, violations
+- **All resource limits**: File size exceeded, timeout, retries
+- **All session events**: Multicast sessions, client join/leave
+
+No manual audit triggers required - events automatically generated
+by instrumentation at security-relevant code paths.
+
+**Evidence**:
+- `audit.rs:281-294` - AuditEvent::log() auto-generates tracing events
+- `main.rs:460-467` - Automatic read request audit
+- `main.rs:513-522` - Automatic security violation audit
 
 ---
 

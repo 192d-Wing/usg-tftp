@@ -7,12 +7,13 @@ use tokio::fs::File;
 use tokio::io::AsyncReadExt;
 use tokio::net::UdpSocket;
 use tokio::sync::RwLock;
-use tokio::time::{timeout, Duration};
+use tokio::time::{Duration, timeout};
 use tracing::{debug, error, info, warn};
 
+use crate::audit::AuditLogger;
 use crate::config::MulticastConfig;
 use crate::error::{Result, TftpError};
-use crate::{TftpOpcode, TftpOptions, TransferMode, DEFAULT_BLOCK_SIZE};
+use crate::{DEFAULT_BLOCK_SIZE, TftpOpcode, TftpOptions, TransferMode};
 
 /// RFC 2090 - TFTP Multicast Option Extension
 ///
@@ -259,7 +260,7 @@ impl MulticastSession {
     /// NIST Controls:
     /// - SC-5: Denial of Service Protection (resource cleanup)
     /// - AU-2: Audit Events (client timeout logging)
-    pub fn remove_inactive_clients(&mut self, timeout_secs: u64) {
+    pub fn remove_inactive_clients(&mut self, timeout_secs: u64, audit_enabled: bool) {
         let timeout_duration = std::time::Duration::from_secs(timeout_secs);
         let now = std::time::Instant::now();
 
@@ -276,6 +277,16 @@ impl MulticastSession {
                 self.session_id, addr
             );
             self.clients.remove(&addr);
+
+            // Audit log: Client removed
+            if audit_enabled {
+                AuditLogger::multicast_client_removed(
+                    &self.session_id,
+                    addr,
+                    "timeout",
+                    self.clients.len(),
+                );
+            }
 
             // RFC 2090: Elect new master if master client times out
             if Some(addr) == self.master_client {
@@ -294,9 +305,10 @@ impl MulticastSession {
     fn elect_new_master(&mut self) {
         // Clear old master
         if let Some(old_master) = self.master_client
-            && let Some(client) = self.clients.get_mut(&old_master) {
-                client.is_master = false;
-            }
+            && let Some(client) = self.clients.get_mut(&old_master)
+        {
+            client.is_master = false;
+        }
 
         // Elect first available client as new master
         if let Some((addr, _)) = self.clients.iter().next() {
@@ -327,6 +339,11 @@ impl MulticastSession {
     pub fn client_count(&self) -> usize {
         self.clients.len()
     }
+
+    /// Get session ID for audit logging
+    pub fn session_id(&self) -> &str {
+        &self.session_id
+    }
 }
 
 /// Multicast TFTP server manager
@@ -341,6 +358,7 @@ pub struct MulticastTftpServer {
     config: MulticastConfig,
     root_dir: PathBuf,
     sessions: Arc<RwLock<HashMap<String, Arc<RwLock<MulticastSession>>>>>,
+    audit_enabled: bool,
 }
 
 impl MulticastTftpServer {
@@ -348,7 +366,7 @@ impl MulticastTftpServer {
     ///
     /// NIST Controls:
     /// - CM-6: Configuration Settings (apply multicast configuration)
-    pub fn new(config: MulticastConfig, root_dir: PathBuf) -> Self {
+    pub fn new(config: MulticastConfig, root_dir: PathBuf, audit_enabled: bool) -> Self {
         info!(
             "Initializing multicast TFTP server ({}:{}, max clients: {})",
             config.multicast_addr, config.multicast_port, config.max_clients
@@ -358,6 +376,7 @@ impl MulticastTftpServer {
             config,
             root_dir,
             sessions: Arc::new(RwLock::new(HashMap::new())),
+            audit_enabled,
         }
     }
 
@@ -405,6 +424,16 @@ impl MulticastTftpServer {
         let mut session_lock = session.write().await;
         let is_master = session_lock.add_client(client_addr)?;
 
+        // Audit log: Client joined multicast session
+        if self.audit_enabled {
+            AuditLogger::multicast_client_joined(
+                session_lock.session_id(),
+                client_addr,
+                is_master,
+                session_lock.client_count(),
+            );
+        }
+
         // RFC 2090: Send OACK with multicast option to client
         self.send_multicast_oack(&response_socket, client_addr, &session_lock, is_master)
             .await?;
@@ -415,8 +444,11 @@ impl MulticastTftpServer {
         if is_master {
             let session_clone = Arc::clone(&session);
             let config = self.config.clone();
+            let audit_enabled = self.audit_enabled;
             tokio::spawn(async move {
-                if let Err(e) = Self::run_multicast_transfer(session_clone, config).await {
+                if let Err(e) =
+                    Self::run_multicast_transfer(session_clone, config, audit_enabled).await
+                {
                     error!("Multicast transfer failed: {}", e);
                 }
             });
@@ -445,13 +477,24 @@ impl MulticastTftpServer {
 
         // Create new session
         let session = Arc::new(RwLock::new(MulticastSession::new(
-            file_path,
+            file_path.clone(),
             mode,
             options,
             self.config.multicast_addr,
             self.config.multicast_port,
             self.config.max_clients,
         )));
+
+        // Audit log: Multicast session created
+        if self.audit_enabled {
+            let session_lock = session.read().await;
+            AuditLogger::multicast_session_created(
+                session_lock.session_id(),
+                &file_path.display().to_string(),
+                &self.config.multicast_addr.to_string(),
+                self.config.multicast_port,
+            );
+        }
 
         sessions.insert(session_key, Arc::clone(&session));
         Ok(session)
@@ -516,6 +559,7 @@ impl MulticastTftpServer {
     async fn run_multicast_transfer(
         session: Arc<RwLock<MulticastSession>>,
         config: MulticastConfig,
+        audit_enabled: bool,
     ) -> Result<()> {
         let (file_data, multicast_addr, multicast_port, block_size, mode) = {
             let session_lock = session.read().await;
@@ -612,7 +656,8 @@ impl MulticastTftpServer {
         }
 
         // Handle retransmissions
-        Self::handle_retransmissions(session, &socket, &file_data, block_size, config).await?;
+        Self::handle_retransmissions(session, &socket, &file_data, block_size, config, audit_enabled)
+            .await?;
 
         Ok(())
     }
@@ -699,6 +744,7 @@ impl MulticastTftpServer {
         file_data: &[u8],
         block_size: usize,
         config: MulticastConfig,
+        audit_enabled: bool,
     ) -> Result<()> {
         let max_retries = 3;
         let retry_timeout = Duration::from_secs(config.retransmit_timeout_secs);
@@ -706,7 +752,7 @@ impl MulticastTftpServer {
         for retry in 0..max_retries {
             let retransmit_blocks = {
                 let mut session_lock = session.write().await;
-                session_lock.remove_inactive_clients(config.master_timeout_secs * 2);
+                session_lock.remove_inactive_clients(config.master_timeout_secs * 2, audit_enabled);
                 session_lock.take_retransmit_queue()
             };
 
@@ -822,9 +868,10 @@ impl MulticastTftpServer {
             // File doesn't exist yet - check that the parent is within bounds
             if let Some(parent) = file_path.parent()
                 && let Ok(canonical_parent) = parent.canonicalize()
-                    && !canonical_parent.starts_with(&canonical_root) {
-                        return Err(TftpError::Tftp("Access denied".to_string()));
-                    }
+                && !canonical_parent.starts_with(&canonical_root)
+            {
+                return Err(TftpError::Tftp("Access denied".to_string()));
+            }
         }
 
         Ok(file_path)
