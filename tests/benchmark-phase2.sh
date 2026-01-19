@@ -231,6 +231,9 @@ start_server() {
 
     print_info "Starting server with config: $config_file"
 
+    # Create log directory if it doesn't exist (for default logging.file path)
+    mkdir -p /var/log/snow-owl 2>/dev/null || true
+
     # Kill any existing server
     if [ -f "$pid_file" ]; then
         local old_pid=$(cat "$pid_file")
