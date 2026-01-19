@@ -149,10 +149,6 @@ root_dir = "$TEST_DIR/tftp-root"
 bind_addr = "0.0.0.0:$SERVER_PORT"
 max_file_size_bytes = 104857600
 
-[logging]
-level = "info"
-format = "text"
-
 [write_config]
 enabled = false
 
@@ -193,10 +189,6 @@ create_config_with_batch() {
 root_dir = "$TEST_DIR/tftp-root"
 bind_addr = "0.0.0.0:$SERVER_PORT"
 max_file_size_bytes = 104857600
-
-[logging]
-level = "info"
-format = "text"
 
 [write_config]
 enabled = false
