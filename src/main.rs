@@ -32,9 +32,10 @@ use tracing_subscriber::EnvFilter;
 //
 // STIG V-222596: Applications must set session timeout limits
 // STIG V-222597: Applications must limit retry attempts
-// Performance optimization: Use 8KB default block size for better throughput
-// RFC 1350 standard is 512 bytes, but RFC 2348 allows negotiation up to 65464 bytes
-pub(crate) const DEFAULT_BLOCK_SIZE: usize = 8192; // Optimized for performance (8KB)
+// RFC 1350: Default block size is 512 bytes for compatibility
+// RFC 2348: Clients can negotiate larger blocks (up to 65464 bytes) via blksize option
+// Performance note: Configure clients to request blksize=8192 or higher for better throughput
+pub(crate) const DEFAULT_BLOCK_SIZE: usize = 512; // RFC 1350 standard for compatibility
 const MAX_BLOCK_SIZE: usize = 65464; // RFC 2348 maximum block size
 const MAX_PACKET_SIZE: usize = 65468; // Max block size + 4 byte header
 const DEFAULT_TIMEOUT_SECS: u64 = 5;
