@@ -1,0 +1,46 @@
+root_dir = "/home/jwillman/projects/snow-owl/crates/snow-owl-tftp/tests/integration-test/server-root"
+bind_addr = "127.0.0.1:6969"
+max_file_size_bytes = 104857600
+
+[logging]
+level = "info"
+format = "text"
+file = "/home/jwillman/projects/snow-owl/crates/snow-owl-tftp/tests/integration-test/server.log"
+audit_enabled = false
+
+[write_config]
+enabled = true
+allow_overwrite = true
+allowed_patterns = ["*.txt", "*.bin", "uploaded-*"]
+
+[multicast]
+enabled = false
+
+[performance]
+default_block_size = 8192
+default_windowsize = 16
+buffer_pool_size = 128
+streaming_threshold = 1048576
+audit_sampling_rate = 1.0
+
+[performance.platform.socket]
+recv_buffer_kb = 2048
+send_buffer_kb = 2048
+reuse_address = true
+reuse_port = true
+
+[performance.platform.file_io]
+use_sequential_hint = true
+use_willneed_hint = true
+fadvise_dontneed_after = false
+
+[performance.platform.batch]
+enable_sendmmsg = true
+enable_recvmmsg = true
+max_batch_size = 32
+batch_timeout_us = 100
+enable_adaptive_batching = true
+adaptive_batch_threshold = 5
+
+[performance.platform.worker_pool]
+enabled = false

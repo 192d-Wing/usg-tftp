@@ -32,9 +32,9 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 TFTP_ROOT="$SCRIPT_DIR"
 TEST_DIR="$TFTP_ROOT/benchmark-test"
 RESULTS_DIR="$TEST_DIR/results"
-BINARY="$PROJECT_ROOT/target/release/snow-owl-tftp"
+BINARY="$PROJECT_ROOT/target/release/snow-owl-tftp-server"
 SERVER_PORT=6969  # Non-privileged port for testing
-CONCURRENT_CLIENTS=100  # High concurrency to stress test worker pool
+CONCURRENT_CLIENTS=50  # Match Phase 2 for fair comparison
 
 # Test files
 SMALL_FILE="test-1kb.bin"

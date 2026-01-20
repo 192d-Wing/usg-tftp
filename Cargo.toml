@@ -6,6 +6,20 @@ authors.workspace = true
 license.workspace = true
 repository.workspace = true
 
+# Server binary
+[[bin]]
+name = "snow-owl-tftp-server"
+path = "src/bin/server.rs"
+
+# Client binary
+[[bin]]
+name = "snow-owl-tftp-client"
+path = "src/bin/client.rs"
+
+[lib]
+name = "snow_owl_tftp"
+path = "src/lib.rs"
+
 [dependencies]
 tokio.workspace = true
 tokio-util.workspace = true

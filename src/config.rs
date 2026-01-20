@@ -133,25 +133,25 @@ fn default_multicast_addr_v4() -> IpAddr {
     IpAddr::V4(Ipv4Addr::new(224, 0, 1, 1))
 }
 
-pub(crate) fn default_multicast_addr_for_version(version: MulticastIpVersion) -> IpAddr {
+pub fn default_multicast_addr_for_version(version: MulticastIpVersion) -> IpAddr {
     match version {
         MulticastIpVersion::V4 => default_multicast_addr_v4(),
         MulticastIpVersion::V6 => default_multicast_addr_v6(),
     }
 }
 
-pub(crate) fn load_config(path: &std::path::Path) -> Result<TftpConfig> {
+pub fn load_config(path: &std::path::Path) -> Result<TftpConfig> {
     let contents = std::fs::read_to_string(path)?;
     let config: TftpConfig = toml::from_str(&contents)
         .map_err(|e| TftpError::Tftp(format!("Invalid config file {}: {}", path.display(), e)))?;
     Ok(config)
 }
 
-pub(crate) fn write_default_config(path: &std::path::Path) -> Result<()> {
+pub fn write_default_config(path: &std::path::Path) -> Result<()> {
     write_config(path, &TftpConfig::default())
 }
 
-pub(crate) fn write_config(path: &std::path::Path, config: &TftpConfig) -> Result<()> {
+pub fn write_config(path: &std::path::Path, config: &TftpConfig) -> Result<()> {
     let contents = toml::to_string_pretty(config)
         .map_err(|e| TftpError::Tftp(format!("Failed to serialize default config: {}", e)))?;
     std::fs::write(path, contents)?;
@@ -169,7 +169,7 @@ pub(crate) fn write_config(path: &std::path::Path, config: &TftpConfig) -> Resul
 /// STIG V-222564: Applications must protect configuration data
 /// STIG V-222566: Applications must validate configuration parameters
 /// STIG V-222602: Applications must enforce access restrictions
-pub(crate) fn validate_config(config: &TftpConfig, validate_bind: bool) -> Result<()> {
+pub fn validate_config(config: &TftpConfig, validate_bind: bool) -> Result<()> {
     // NIST CM-6: Validate root directory is absolute path
     // STIG V-222566: Configuration parameter validation
     if !config.root_dir.is_absolute() {
