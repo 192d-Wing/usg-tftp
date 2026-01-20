@@ -586,7 +586,7 @@ impl Default for TftpOptions {
             block_size: DEFAULT_BLOCK_SIZE,
             timeout: DEFAULT_TIMEOUT_SECS,
             transfer_size: None,
-            windowsize: 8, // RFC 7440: 8x better performance, backward compatible
+            windowsize: 1, // RFC 7440: windowsize=1 equals RFC 1350 behavior
         }
     }
 }
