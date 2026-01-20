@@ -8,6 +8,7 @@ use snow_owl_tftp::{
 
 use bytes::{Buf, BufMut, BytesMut};
 use clap::Parser;
+use socket2::{Socket, Domain, Type, Protocol};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -136,10 +137,20 @@ impl TftpClient {
 
     /// Download a file from the TFTP server (RRQ)
     async fn get(&mut self, remote_file: &str, local_file: &Path) -> Result<()> {
-        // Create UDP socket - don't connect yet, as server will respond from different port
-        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        // Create UDP socket with large receive buffer for RFC 7440 windowing
+        // Calculate buffer size based on windowsize: windowsize * (block_size + 4 byte header) * 2 for safety
+        let buffer_size_kb = ((self.windowsize * (self.block_size + 4) * 2) / 1024).max(512);
 
-        debug!("Bound to {:?}", socket.local_addr()?);
+        let socket2_socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+        socket2_socket.set_recv_buffer_size(buffer_size_kb * 1024)?;
+        socket2_socket.set_nonblocking(true)?;
+        socket2_socket.bind(&"0.0.0.0:0".parse::<SocketAddr>().unwrap().into())?;
+
+        let std_socket: std::net::UdpSocket = socket2_socket.into();
+        std_socket.set_nonblocking(true)?;
+        let socket = UdpSocket::from_std(std_socket)?;
+
+        debug!("Bound to {:?} with {}KB receive buffer", socket.local_addr()?, buffer_size_kb);
 
         // Send Read Request (RRQ) to server's listening port
         let mut packet = BytesMut::new();
@@ -289,11 +300,20 @@ impl TftpClient {
         let mut file = File::open(local_file).await?;
         let file_size = file.metadata().await?.len();
 
-        // Create UDP socket
-        let socket = UdpSocket::bind("0.0.0.0:0").await?;
-        socket.connect(self.server_addr).await?;
+        // Create UDP socket with large receive buffer for ACKs
+        let buffer_size_kb = 512; // 512KB should be sufficient for ACK packets
 
-        debug!("Connected to server on {:?}", socket.local_addr()?);
+        let socket2_socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))?;
+        socket2_socket.set_recv_buffer_size(buffer_size_kb * 1024)?;
+        socket2_socket.set_nonblocking(true)?;
+        socket2_socket.bind(&"0.0.0.0:0".parse::<SocketAddr>().unwrap().into())?;
+
+        let std_socket: std::net::UdpSocket = socket2_socket.into();
+        std_socket.set_nonblocking(true)?;
+        std_socket.connect(self.server_addr)?;
+        let socket = UdpSocket::from_std(std_socket)?;
+
+        debug!("Connected to server on {:?} with {}KB receive buffer", socket.local_addr()?, buffer_size_kb);
 
         // Send Write Request (WRQ)
         self.send_wrq(&socket, remote_file, file_size).await?;
