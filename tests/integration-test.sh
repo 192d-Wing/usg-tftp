@@ -143,14 +143,22 @@ EOF
 start_server() {
     echo -e "${BLUE}Starting TFTP server...${NC}"
 
-    # Find the server binary
+    # Find the server binary (check multiple possible locations)
     SERVER_BIN=""
-    if [ -f "../../../target/release/snow-owl-tftp" ]; then
-        SERVER_BIN="../../../target/release/snow-owl-tftp"
-    elif [ -f "../../../target/debug/snow-owl-tftp" ]; then
-        SERVER_BIN="../../target/debug/snow-owl-tftp"
+
+    # Try project root paths first
+    if [ -f "../../../target/release/snow-owl-tftp-server" ]; then
+        SERVER_BIN="../../../target/release/snow-owl-tftp-server"
+    elif [ -f "../../../target/debug/snow-owl-tftp-server" ]; then
+        SERVER_BIN="../../../target/debug/snow-owl-tftp-server"
+    # Try from crate directory
+    elif [ -f "../../target/release/snow-owl-tftp-server" ]; then
+        SERVER_BIN="../../target/release/snow-owl-tftp-server"
+    elif [ -f "../../target/debug/snow-owl-tftp-server" ]; then
+        SERVER_BIN="../../target/debug/snow-owl-tftp-server"
     else
-        echo -e "${RED}ERROR: Server binary not found. Please run 'cargo build' first.${NC}"
+        echo -e "${RED}ERROR: Server binary not found.${NC}"
+        echo -e "${RED}Please run 'cargo build --release' from the project root first.${NC}"
         exit 1
     fi
 

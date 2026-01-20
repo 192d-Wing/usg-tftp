@@ -1,65 +1,121 @@
-# TFTP Integration Tests
+# TFTP Test Suite
 
-Automated integration tests for the Snow-Owl TFTP server.
+Comprehensive automated tests for the Snow-Owl TFTP server, including integration tests and RFC 7440 windowsize tests.
 
 ## Quick Start
 
-### Option 1: Docker (Recommended)
+### Run All Tests (Recommended)
+
+Run the complete test suite including integration and windowsize tests:
+
+```bash
+# Build and run all tests
+cd crates/snow-owl-tftp
+cargo build --release
+./tests/run-all-tests.sh
+```
+
+### Option 1: Docker (Integration Tests Only)
 
 Run tests in a consistent Linux environment using Docker:
 
 ```bash
-cd /Users/johnewillmanv/projects/Snow-Owl/crates/snow-owl-tftp/tests
+cd crates/snow-owl-tftp/tests
 ./run-docker-tests.sh
 ```
 
-This automatically builds the Docker image and runs all tests.
+This automatically builds the Docker image and runs all integration tests.
 
-### Option 2: Local System
+### Option 2: Individual Test Suites
 
-Run tests directly on your system:
+Run specific test suites:
 
 ```bash
 # Build the server first
-cd /Users/johnewillmanv/projects/Snow-Owl
 cargo build --release
 
-# Run the integration tests
-cd crates/snow-owl-tftp/tests
-./integration-test.sh
+# Run integration tests only
+./tests/integration-test.sh
+
+# Run windowsize tests only (requires atftp)
+./tests/windowsize-test.sh
+
+# Run performance analysis (requires Python 3)
+./tests/windowsize-analyzer.py performance
 ```
 
 **Note:** macOS users may experience issues with the built-in TFTP client. Docker is recommended for consistent results.
 
-## What Gets Tested
+## Test Suites
 
-The automated test suite validates:
+### 1. Integration Tests (`integration-test.sh`)
+
+Core TFTP functionality and RFC compliance tests.
 
 ✅ **Basic Operations**
-
 - Read requests (RRQ)
 - Write requests (WRQ)
 - Large file transfers
 - NETASCII mode transfers
 
 ✅ **RFC Compliance**
-
 - Path traversal protection
 - Transfer size validation
 - Timeout handling
 - Option negotiation
 
 ✅ **Security Controls**
-
 - Write pattern validation (allowed/denied)
 - Access control enforcement
 - Audit logging
 
 ✅ **Performance**
-
 - Concurrent transfers
 - Sequential transfers
 - File integrity (MD5 checksums)
+
+### 2. Windowsize Tests (`windowsize-test.sh`)
+
+RFC 7440 windowsize option testing with 32 comprehensive test cases.
+
+✅ **Windowsize Values**
+- Tests 1-8: Small file (1KB) with windowsize 1-8
+- Tests 9-16: Medium file (10KB) with windowsize 1, 2, 4, 8, 12, 16, 24, 32
+- Tests 17-24: Large file (100KB) with windowsize 1, 2, 4, 8, 16, 32, 48, 64
+- Tests 25-28: XLarge file (512KB) with windowsize 1, 8, 32, 64
+- Tests 29-30: Single block edge cases
+- Tests 31-32: Exact window boundary cases
+
+✅ **Performance Metrics**
+- Transfer time measurement
+- Throughput calculation (Mbps)
+- Packet and ACK counting
+- Retransmission tracking
+- File integrity verification
+
+**See:** [WINDOWSIZE_TESTS.md](WINDOWSIZE_TESTS.md) for detailed documentation.
+
+### 3. Performance Analyzer (`windowsize-analyzer.py`)
+
+Advanced Python-based testing with detailed metrics:
+
+```bash
+# Quick test (windowsize 1-8)
+./tests/windowsize-analyzer.py quick
+
+# Full suite (all 32 tests)
+./tests/windowsize-analyzer.py full
+
+# Performance comparison
+./tests/windowsize-analyzer.py performance
+```
+
+**Metrics provided:**
+- Transfer time and throughput
+- Total packets and ACKs
+- Retransmission rate
+- Packet loss rate
+- Average RTT
 
 ## Test Output
 
@@ -102,30 +158,51 @@ All tests passed!
 
 ## Requirements
 
-### Required
+### Integration Tests
 
 - `tftp` client (tftp-hpa or compatible)
 - `md5sum` or `md5` (for file integrity checks)
 
-### Installation
-
-**Ubuntu/Debian:**
+**Installation:**
 
 ```bash
+# Ubuntu/Debian
 sudo apt-get install tftp-hpa
-```
 
-**macOS:**
-
-```bash
+# macOS
 brew install tftp-hpa
 # or use built-in tftp
+
+# CentOS/RHEL
+sudo yum install tftp
 ```
 
-**CentOS/RHEL:**
+### Windowsize Tests
+
+- `atftp` client (supports RFC 7440 windowsize option)
+- `md5sum` or `md5` (for file integrity checks)
+
+**Installation:**
 
 ```bash
-sudo yum install tftp
+# Ubuntu/Debian
+sudo apt-get install atftp
+
+# macOS
+brew install atftp
+
+# CentOS/RHEL
+sudo yum install atftp
+```
+
+### Performance Analyzer
+
+- Python 3.6+ (no external dependencies required)
+
+**Check version:**
+
+```bash
+python3 --version
 ```
 
 ## Test Details
