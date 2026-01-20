@@ -1,6 +1,6 @@
 # Build Status - Snow-Owl TFTP
 
-**Last Updated:** 2026-01-19
+**Last Updated:** 2026-01-20
 **Status:** ✅ All Systems Operational
 
 ---
@@ -156,7 +156,7 @@ sudo ./benchmark-phase2.sh
 
 ```toml
 root_dir = "/var/lib/tftp"
-bind_addr = "0.0.0.0:69"
+bind_addr = "[::]:69"  # IPv6 dual-stack (accepts both IPv4 and IPv6)
 
 # All Phase 1 & 2 optimizations enabled by default
 ```
@@ -222,9 +222,9 @@ cargo build --release -p snow-owl-tftp
 # Unit tests
 cargo test -p snow-owl-tftp
 
-# Integration tests (Docker)
+# Integration tests (16 tests: 10 IPv4 + 6 IPv6)
 cd crates/snow-owl-tftp/tests
-./run-docker-tests.sh
+./integration-test.sh
 
 # Benchmarks
 cd crates/snow-owl-tftp

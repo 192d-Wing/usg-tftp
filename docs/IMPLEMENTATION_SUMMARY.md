@@ -2,7 +2,7 @@
 
 ## Snow-Owl TFTP Server - Linux/BSD Performance Enhancements
 
-**Date:** 2026-01-19
+**Date:** 2026-01-20
 **Version:** 1.0
 **Status:** Phase 1 & 2 Complete, Phase 3 Design Complete
 
@@ -305,7 +305,7 @@ strace -c ./target/release/snow-owl-tftp -c config.toml
 
 ```toml
 root_dir = "/var/lib/tftp"
-bind_addr = "0.0.0.0:69"
+bind_addr = "[::]:69"  # IPv6 dual-stack (accepts both IPv4 and IPv6)
 
 # All Phase 1 & 2 optimizations enabled by default on Linux/BSD
 ```
@@ -412,6 +412,8 @@ nix = { version = "0.30", features = ["socket", "fs"] }
 
 ### Integration Tests
 
+- ✅ Complete: 16 integration tests (10 IPv4 + 6 IPv6) pass
+- ✅ Complete: IPv6 file transfers fully functional
 - ⏳ Pending: Phase 2 benchmarking with integration-test.sh
 - ⏳ Pending: Concurrent transfer stress testing
 - ⏳ Pending: Platform compatibility testing

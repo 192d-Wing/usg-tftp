@@ -721,6 +721,101 @@ EOF
     return 0
 }
 
+# Test 15: IPv6 Concurrent transfers
+test_ipv6_concurrent_transfers() {
+    if ! check_ipv6_available; then
+        echo "IPv6 not available on system"
+        return 2  # Skip
+    fi
+
+    if ! command -v atftp &> /dev/null; then
+        echo "atftp not available for IPv6 testing"
+        return 2  # Skip
+    fi
+
+    # Check if IPv6 server is still running
+    if [ -z "$SERVER_PID_IPV6" ] || ! kill -0 $SERVER_PID_IPV6 2>/dev/null; then
+        echo "IPv6 server not running"
+        return 2  # Skip
+    fi
+
+    cd "$TEST_DIR/client"
+
+    local orig_md5=$(calculate_md5 "$TEST_DIR/root/random.bin")
+
+    # Launch 3 concurrent IPv6 downloads and collect PIDs
+    local pids=""
+    for i in 1 2 3; do
+        timeout 30 atftp -g -r random.bin -l random-ipv6-$i.bin ::1 $SERVER_PORT_IPV6 >/dev/null 2>&1 &
+        pids="$pids $!"
+    done
+
+    # Wait for specific PIDs only
+    for pid in $pids; do
+        wait $pid 2>/dev/null || true
+    done
+
+    # Verify all files
+    for i in 1 2 3; do
+        if [ ! -f "random-ipv6-$i.bin" ]; then
+            echo "IPv6 concurrent download $i failed"
+            rm -f random-ipv6-*.bin
+            return 1
+        fi
+
+        local recv_md5=$(calculate_md5 "random-ipv6-$i.bin")
+        if [ "$orig_md5" != "$recv_md5" ]; then
+            echo "IPv6 concurrent download $i corrupted"
+            rm -f random-ipv6-*.bin
+            return 1
+        fi
+    done
+
+    rm -f random-ipv6-*.bin
+    return 0
+}
+
+# Test 16: IPv6 Sequential transfers
+test_ipv6_sequential_transfers() {
+    if ! check_ipv6_available; then
+        echo "IPv6 not available on system"
+        return 2  # Skip
+    fi
+
+    if ! command -v atftp &> /dev/null; then
+        echo "atftp not available for IPv6 testing"
+        return 2  # Skip
+    fi
+
+    # Check if IPv6 server is still running
+    if [ -z "$SERVER_PID_IPV6" ] || ! kill -0 $SERVER_PID_IPV6 2>/dev/null; then
+        echo "IPv6 server not running"
+        return 2  # Skip
+    fi
+
+    cd "$TEST_DIR/client"
+
+    # Perform 5 sequential IPv6 transfers
+    for i in 1 2 3 4 5; do
+        timeout 10 atftp -g -r hello.txt -l hello-ipv6-seq-$i.txt ::1 $SERVER_PORT_IPV6 >/dev/null 2>&1 || true
+
+        if [ ! -f "hello-ipv6-seq-$i.txt" ]; then
+            echo "IPv6 sequential transfer $i failed"
+            rm -f hello-ipv6-seq-*.txt
+            return 1
+        fi
+
+        if ! grep -q "Hello, TFTP!" "hello-ipv6-seq-$i.txt"; then
+            echo "IPv6 sequential transfer $i content incorrect"
+            rm -f hello-ipv6-seq-*.txt
+            return 1
+        fi
+    done
+
+    rm -f hello-ipv6-seq-*.txt
+    return 0
+}
+
 # ============================================================================
 # Main Test Execution
 # ============================================================================
@@ -760,7 +855,7 @@ main() {
     run_test "Test 9: NETASCII mode" test_netascii_mode
     run_test "Test 10: Sequential transfers" test_sequential_transfers
 
-    # Run IPv6 tests (11-14) if IPv6 server is running
+    # Run IPv6 tests (11-16) if IPv6 server is running
     if [ "$IPV6_AVAILABLE" = true ]; then
         echo ""
         echo -e "${BLUE}Running IPv6 tests...${NC}"
@@ -769,11 +864,13 @@ main() {
         run_test "Test 12: IPv6 Large file transfer" test_ipv6_large_file
         run_test "Test 13: IPv6 Basic WRQ" test_ipv6_basic_wrq
         run_test "Test 14: IPv6 Dual-stack" test_ipv6_dual_stack
+        run_test "Test 15: IPv6 Concurrent transfers" test_ipv6_concurrent_transfers
+        run_test "Test 16: IPv6 Sequential transfers" test_ipv6_sequential_transfers
     else
         echo ""
         echo -e "${YELLOW}Skipping IPv6 tests (IPv6 not available)${NC}"
         echo ""
-        ((SKIPPED+=4)) || true
+        ((SKIPPED+=6)) || true
     fi
 
     # Print summary

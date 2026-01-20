@@ -591,6 +591,76 @@ rm disabled-write.txt
 
 ---
 
+## IPv6 Tests
+
+### Test 11: IPv6 Basic RRQ
+
+**Objective**: Verify basic IPv6 read request functionality
+
+```bash
+# Requires atftp for IPv6 support
+atftp -g -r hello.txt -l hello-ipv6.txt ::1 6970
+
+# Verify file content
+cat hello-ipv6.txt
+# Expected: "Hello, TFTP!"
+```
+
+**Expected Result**: File successfully downloaded over IPv6 with correct content
+
+---
+
+### Test 12: IPv6 Large File Transfer
+
+**Objective**: Verify IPv6 file integrity for larger transfers
+
+```bash
+atftp -g -r random.bin -l random-ipv6.bin ::1 6970
+
+# Verify checksum
+md5sum /tmp/tftp-test/root/random.bin random-ipv6.bin
+```
+
+**Expected Result**: File transfers complete with matching checksums
+
+---
+
+### Test 13: IPv6 Write Request
+
+**Objective**: Verify IPv6 write request functionality
+
+```bash
+echo "IPv6 upload test content" > upload-ipv6.txt
+atftp -p -l upload-ipv6.txt -r upload-ipv6.txt ::1 6970
+
+# Verify uploaded file
+cat /tmp/tftp-test/root/upload-ipv6.txt
+```
+
+**Expected Result**: File uploaded successfully over IPv6
+
+---
+
+### Test 14: IPv6 Dual-Stack
+
+**Objective**: Verify server bound to [::] accepts IPv4 clients
+
+```bash
+# Server config: bind_addr = "[::]:6970"
+# Connect with IPv4 client to dual-stack server
+tftp 127.0.0.1 6970 << EOF
+mode octet
+get hello.txt hello-dualstack.txt
+quit
+EOF
+
+cat hello-dualstack.txt
+```
+
+**Expected Result**: IPv4 client can connect to IPv6 dual-stack server
+
+---
+
 ## Client Compatibility Matrix
 
 | Client | RRQ | WRQ | Options | Block Size | Transfer Size | Notes |
