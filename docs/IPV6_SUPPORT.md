@@ -208,7 +208,7 @@ The socket2 crate allows explicit control over the socket domain, ensuring the s
 - [x] Add IPv6 test cases to integration test suite (Tests 11-16)
 - [x] Test dual-stack connectivity (Test 14)
 - [x] Test concurrent IPv6 transfers (Test 15)
-- [x] Test IPv6 NETASCII mode (Test 16)
+- [x] Test IPv6 Sequential transfers (Test 16)
 - [ ] Test IPv4-mapped IPv6 addresses
 - [ ] Test link-local addresses with scope IDs
 
