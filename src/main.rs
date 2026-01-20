@@ -1081,7 +1081,13 @@ impl TftpServer {
                         );
 
                         // Create a response socket for this client
-                        let response_socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
+                        // Use IPv6 unspecified if client is IPv6, IPv4 otherwise (dual-stack support)
+                        let bind_addr = if client_addr.is_ipv6() {
+                            SocketAddr::new(std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0)
+                        } else {
+                            SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0)
+                        };
+                        let response_socket = Arc::new(UdpSocket::bind(bind_addr).await?);
                         response_socket.connect(client_addr).await?;
 
                         // Delegate to multicast server
@@ -1477,7 +1483,13 @@ impl TftpServer {
     ) -> Result<()> {
         let start_time = std::time::Instant::now();
         // RFC 1350: Each transfer connection uses a new TID (Transfer ID)
-        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        // Use IPv6 unspecified if client is IPv6, IPv4 otherwise (dual-stack support)
+        let bind_addr = if client_addr.is_ipv6() {
+            SocketAddr::new(std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0)
+        } else {
+            SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0)
+        };
+        let socket = UdpSocket::bind(bind_addr).await?;
         socket.connect(client_addr).await?;
 
         // Open and validate file
@@ -1976,7 +1988,13 @@ impl TftpServer {
         let start_time = std::time::Instant::now();
 
         // RFC 1350: Each transfer connection uses a new TID (Transfer ID)
-        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        // Use IPv6 unspecified if client is IPv6, IPv4 otherwise
+        let bind_addr = if client_addr.is_ipv6() {
+            "[::]:0"
+        } else {
+            "0.0.0.0:0"
+        };
+        let socket = UdpSocket::bind(bind_addr).await?;
         socket.connect(client_addr).await?;
 
         // Audit log: Write started
@@ -2678,7 +2696,13 @@ impl TftpServer {
         error_code: TftpErrorCode,
         message: &str,
     ) -> Result<()> {
-        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        // Use IPv6 unspecified if client is IPv6, IPv4 otherwise (dual-stack support)
+        let bind_addr = if client_addr.is_ipv6() {
+            SocketAddr::new(std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0)
+        } else {
+            SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0)
+        };
+        let socket = UdpSocket::bind(bind_addr).await?;
         socket.connect(client_addr).await?;
         Self::send_error_on_socket(&socket, error_code, message).await
     }
