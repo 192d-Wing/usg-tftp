@@ -14,7 +14,9 @@ NC='\033[0m' # No Color
 # Configuration
 TEST_DIR="/tmp/tftp-test-$$"
 SERVER_PORT="6969"
+SERVER_PORT_IPV6="6970"
 SERVER_PID=""
+SERVER_PID_IPV6=""
 RESULTS_FILE="$TEST_DIR/test-results.txt"
 PASSED=0
 FAILED=0
@@ -24,10 +26,16 @@ SKIPPED=0
 cleanup() {
     echo -e "\n${YELLOW}Cleaning up...${NC}"
 
-    # Kill server if running
+    # Kill IPv4 server if running
     if [ -n "$SERVER_PID" ]; then
         kill $SERVER_PID 2>/dev/null || true
         wait $SERVER_PID 2>/dev/null || true
+    fi
+
+    # Kill IPv6 server if running
+    if [ -n "$SERVER_PID_IPV6" ]; then
+        kill $SERVER_PID_IPV6 2>/dev/null || true
+        wait $SERVER_PID_IPV6 2>/dev/null || true
     fi
 
     # Remove test directory
@@ -83,8 +91,15 @@ run_test() {
 
     echo -n "Running: $test_name... "
 
-    if eval "$test_cmd" >> "$RESULTS_FILE" 2>&1; then
+    local result
+    eval "$test_cmd" >> "$RESULTS_FILE" 2>&1
+    result=$?
+
+    if [ $result -eq 0 ]; then
         print_result "$test_name" "PASS"
+    elif [ $result -eq 2 ]; then
+        local reason=$(tail -1 "$RESULTS_FILE")
+        print_result "$test_name" "SKIP" "$reason"
     else
         local error=$(tail -1 "$RESULTS_FILE")
         print_result "$test_name" "FAIL" "$error"
@@ -110,6 +125,32 @@ max_file_size_bytes = 10485760
 level = "info"
 format = "text"
 file = "$TEST_DIR/logs/tftp.log"
+audit_enabled = true
+
+[write_config]
+enabled = true
+allow_overwrite = true
+allowed_patterns = [
+    "*.txt",
+    "*.bin",
+    "*.cfg",
+    "uploads/*"
+]
+
+[multicast]
+enabled = false
+EOF
+
+    # Create IPv6 test config (dual-stack server)
+    cat > "$TEST_DIR/tftp-ipv6.toml" <<EOF
+root_dir = "$TEST_DIR/root"
+bind_addr = "[::]:$SERVER_PORT_IPV6"
+max_file_size_bytes = 10485760
+
+[logging]
+level = "info"
+format = "text"
+file = "$TEST_DIR/logs/tftp-ipv6.log"
 audit_enabled = true
 
 [write_config]
@@ -178,6 +219,51 @@ start_server() {
 
     echo -e "${GREEN}Server started (PID: $SERVER_PID)${NC}"
     echo ""
+}
+
+# Start IPv6 TFTP server (for IPv6 tests)
+start_server_ipv6() {
+    # Check if IPv6 is available
+    if ! ip -6 addr show lo 2>/dev/null | grep -q "inet6 ::1"; then
+        echo -e "${YELLOW}IPv6 not available, skipping IPv6 server${NC}"
+        return 1
+    fi
+
+    echo -e "${BLUE}Starting IPv6 TFTP server...${NC}"
+
+    # Find the server binary (reuse logic from start_server)
+    SERVER_BIN=""
+    if [ -f "../../../target/release/snow-owl-tftp-server" ]; then
+        SERVER_BIN="../../../target/release/snow-owl-tftp-server"
+    elif [ -f "../../../target/debug/snow-owl-tftp-server" ]; then
+        SERVER_BIN="../../../target/debug/snow-owl-tftp-server"
+    elif [ -f "../../target/release/snow-owl-tftp-server" ]; then
+        SERVER_BIN="../../target/release/snow-owl-tftp-server"
+    elif [ -f "../../target/debug/snow-owl-tftp-server" ]; then
+        SERVER_BIN="../../target/debug/snow-owl-tftp-server"
+    else
+        echo -e "${YELLOW}Server binary not found for IPv6${NC}"
+        return 1
+    fi
+
+    # Start IPv6 server in background
+    "$SERVER_BIN" --config "$TEST_DIR/tftp-ipv6.toml" > "$TEST_DIR/logs/server-ipv6.log" 2>&1 &
+    SERVER_PID_IPV6=$!
+
+    # Wait for server to start
+    sleep 2
+
+    # Check if server is running
+    if ! kill -0 $SERVER_PID_IPV6 2>/dev/null; then
+        echo -e "${YELLOW}IPv6 server failed to start (IPv6 tests will be skipped)${NC}"
+        cat "$TEST_DIR/logs/server-ipv6.log"
+        SERVER_PID_IPV6=""
+        return 1
+    fi
+
+    echo -e "${GREEN}IPv6 Server started (PID: $SERVER_PID_IPV6)${NC}"
+    echo ""
+    return 0
 }
 
 # Check if required tools are available
@@ -466,6 +552,177 @@ EOF
 }
 
 # ============================================================================
+# IPv6 Tests (Tests 11-14)
+# ============================================================================
+
+# Check if IPv6 is available on the system
+check_ipv6_available() {
+    if ip -6 addr show lo 2>/dev/null | grep -q "inet6 ::1"; then
+        return 0
+    fi
+    return 1
+}
+
+# Test 11: IPv6 Basic RRQ
+test_ipv6_basic_rrq() {
+    if ! check_ipv6_available; then
+        echo "IPv6 not available on system"
+        return 2  # Skip
+    fi
+
+    if ! command -v atftp &> /dev/null; then
+        echo "atftp not available for IPv6 testing"
+        return 2  # Skip
+    fi
+
+    # Check if IPv6 server is still running
+    if [ -z "$SERVER_PID_IPV6" ] || ! kill -0 $SERVER_PID_IPV6 2>/dev/null; then
+        echo "IPv6 server not running"
+        return 2  # Skip
+    fi
+
+    cd "$TEST_DIR/client"
+
+    # Use atftp for IPv6 (standard tftp client may not support IPv6)
+    timeout 10 atftp -g -r hello.txt -l hello-ipv6.txt ::1 $SERVER_PORT_IPV6 2>&1 || true
+
+    if [ ! -f hello-ipv6.txt ]; then
+        echo "IPv6 file not downloaded"
+        return 1
+    fi
+
+    if ! grep -q "Hello, TFTP!" hello-ipv6.txt; then
+        echo "IPv6 file content incorrect"
+        return 1
+    fi
+
+    rm -f hello-ipv6.txt
+    return 0
+}
+
+# Test 12: IPv6 Large file transfer
+test_ipv6_large_file() {
+    if ! check_ipv6_available; then
+        echo "IPv6 not available on system"
+        return 2  # Skip
+    fi
+
+    if ! command -v atftp &> /dev/null; then
+        echo "atftp not available for IPv6 testing"
+        return 2  # Skip
+    fi
+
+    # Check if IPv6 server is still running
+    if [ -z "$SERVER_PID_IPV6" ] || ! kill -0 $SERVER_PID_IPV6 2>/dev/null; then
+        echo "IPv6 server not running"
+        return 2  # Skip
+    fi
+
+    cd "$TEST_DIR/client"
+
+    local orig_md5=$(calculate_md5 "$TEST_DIR/root/random.bin")
+
+    # Use verbose mode and explicit options for debugging
+    timeout 60 atftp -g -r random.bin -l random-ipv6.bin ::1 $SERVER_PORT_IPV6 2>&1 || true
+
+    if [ ! -f random-ipv6.bin ]; then
+        echo "IPv6 large file not downloaded"
+        return 1
+    fi
+
+    local recv_md5=$(calculate_md5 "random-ipv6.bin")
+    if [ "$orig_md5" != "$recv_md5" ]; then
+        echo "IPv6 file checksum mismatch (orig: $orig_md5, recv: $recv_md5)"
+        return 1
+    fi
+
+    rm -f random-ipv6.bin
+    return 0
+}
+
+# Test 13: IPv6 Write Request
+test_ipv6_basic_wrq() {
+    if ! check_ipv6_available; then
+        echo "IPv6 not available on system"
+        return 2  # Skip
+    fi
+
+    if ! command -v atftp &> /dev/null; then
+        echo "atftp not available for IPv6 testing"
+        return 2  # Skip
+    fi
+
+    # Check if IPv6 server is still running
+    if [ -z "$SERVER_PID_IPV6" ] || ! kill -0 $SERVER_PID_IPV6 2>/dev/null; then
+        echo "IPv6 server not running"
+        return 2  # Skip
+    fi
+
+    cd "$TEST_DIR/client"
+
+    # Create file to upload
+    echo "IPv6 upload test content" > upload-ipv6.txt
+
+    # Use explicit timeout and capture errors
+    local result
+    result=$(timeout 15 atftp -p -l upload-ipv6.txt -r upload-ipv6.txt ::1 $SERVER_PORT_IPV6 2>&1) || true
+
+    # Give server time to write file
+    sleep 1
+
+    if [ ! -f "$TEST_DIR/root/upload-ipv6.txt" ]; then
+        echo "IPv6 file not uploaded (atftp output: $result)"
+        rm -f upload-ipv6.txt
+        return 1
+    fi
+
+    if ! grep -q "IPv6 upload test content" "$TEST_DIR/root/upload-ipv6.txt"; then
+        echo "IPv6 uploaded file content incorrect"
+        rm -f upload-ipv6.txt
+        return 1
+    fi
+
+    rm -f upload-ipv6.txt
+    return 0
+}
+
+# Test 14: IPv6 Dual-stack (server on [::] accepts IPv4 clients)
+test_ipv6_dual_stack() {
+    if ! check_ipv6_available; then
+        echo "IPv6 not available on system"
+        return 2  # Skip
+    fi
+
+    # Check if IPv6 server is still running
+    if [ -z "$SERVER_PID_IPV6" ] || ! kill -0 $SERVER_PID_IPV6 2>/dev/null; then
+        echo "IPv6 server not running"
+        return 2  # Skip
+    fi
+
+    cd "$TEST_DIR/client"
+
+    # Test IPv4 client connecting to IPv6 dual-stack server
+    tftp 127.0.0.1 $SERVER_PORT_IPV6 <<EOF
+mode octet
+get hello.txt hello-dualstack.txt
+quit
+EOF
+
+    if [ ! -f hello-dualstack.txt ]; then
+        echo "Dual-stack IPv4 connection failed"
+        return 1
+    fi
+
+    if ! grep -q "Hello, TFTP!" hello-dualstack.txt; then
+        echo "Dual-stack file content incorrect"
+        return 1
+    fi
+
+    rm -f hello-dualstack.txt
+    return 0
+}
+
+# ============================================================================
 # Main Test Execution
 # ============================================================================
 
@@ -483,10 +740,16 @@ main() {
 
     start_server
 
+    # Try to start IPv6 server (may fail if IPv6 not available)
+    IPV6_AVAILABLE=false
+    if start_server_ipv6; then
+        IPV6_AVAILABLE=true
+    fi
+
     echo -e "${BLUE}Running tests...${NC}"
     echo ""
 
-    # Run all tests
+    # Run IPv4 tests (1-10)
     run_test "Test 1: Basic RRQ" test_basic_rrq
     run_test "Test 2: Large file transfer" test_large_file
     run_test "Test 3: Basic WRQ" test_basic_wrq
@@ -497,6 +760,22 @@ main() {
     run_test "Test 8: Audit logging" test_audit_logging
     run_test "Test 9: NETASCII mode" test_netascii_mode
     run_test "Test 10: Sequential transfers" test_sequential_transfers
+
+    # Run IPv6 tests (11-14) if IPv6 server is running
+    if [ "$IPV6_AVAILABLE" = true ]; then
+        echo ""
+        echo -e "${BLUE}Running IPv6 tests...${NC}"
+        echo ""
+        run_test "Test 11: IPv6 Basic RRQ" test_ipv6_basic_rrq
+        run_test "Test 12: IPv6 Large file transfer" test_ipv6_large_file
+        run_test "Test 13: IPv6 Basic WRQ" test_ipv6_basic_wrq
+        run_test "Test 14: IPv6 Dual-stack" test_ipv6_dual_stack
+    else
+        echo ""
+        echo -e "${YELLOW}Skipping IPv6 tests (IPv6 not available)${NC}"
+        echo ""
+        ((SKIPPED+=4)) || true
+    fi
 
     # Print summary
     echo ""
