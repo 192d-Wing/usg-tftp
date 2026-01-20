@@ -663,15 +663,14 @@ test_ipv6_basic_wrq() {
     # Create file to upload
     echo "IPv6 upload test content" > upload-ipv6.txt
 
-    # Use explicit timeout and capture errors
-    local result
-    result=$(timeout 15 atftp -p -l upload-ipv6.txt -r upload-ipv6.txt ::1 $SERVER_PORT_IPV6 2>&1) || true
+    # Run atftp put - don't capture output to avoid subshell hanging
+    timeout 10 atftp -p -l upload-ipv6.txt -r upload-ipv6.txt ::1 $SERVER_PORT_IPV6 >/dev/null 2>&1 || true
 
     # Give server time to write file
     sleep 1
 
     if [ ! -f "$TEST_DIR/root/upload-ipv6.txt" ]; then
-        echo "IPv6 file not uploaded (atftp output: $result)"
+        echo "IPv6 file not uploaded"
         rm -f upload-ipv6.txt
         return 1
     fi
