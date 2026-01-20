@@ -149,6 +149,9 @@ root_dir = "$TEST_DIR/tftp-root"
 bind_addr = "0.0.0.0:$SERVER_PORT"
 max_file_size_bytes = 104857600
 
+[logging]
+file = "$TEST_DIR/results/tftp-no-workers.log"
+
 [write_config]
 enabled = false
 
@@ -196,6 +199,9 @@ create_config_with_workers() {
 root_dir = "$TEST_DIR/tftp-root"
 bind_addr = "0.0.0.0:$SERVER_PORT"
 max_file_size_bytes = 104857600
+
+[logging]
+file = "$TEST_DIR/results/tftp-with-workers.log"
 
 [write_config]
 enabled = false

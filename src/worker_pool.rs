@@ -481,17 +481,23 @@ async fn batch_recv_packets_internal(
         Ok(msgs_received) => {
             let mut results = Vec::new();
 
-            for (i, msg) in msgs_received.into_iter().enumerate() {
-                if let Some(addr_storage) = msg.address {
-                    let addr = sockaddr_to_std(&addr_storage)?;
-                    let data = buffers[i][..msg.bytes].to_vec();
-                    results.push((data, addr));
-                }
+            // Collect message info before accessing buffers
+            let msg_info: Vec<_> = msgs_received
+                .into_iter()
+                .enumerate()
+                .filter_map(|(i, msg)| msg.address.map(|addr| (i, msg.bytes, addr)))
+                .collect();
+
+            // Now we can access buffers without borrow conflicts
+            for (i, bytes_received, addr_storage) in msg_info {
+                let addr = sockaddr_to_std(&addr_storage)?;
+                let data = buffers[i][..bytes_received].to_vec();
+                results.push((data, addr));
             }
 
             Ok(results)
         }
-        Err(nix::errno::Errno::EAGAIN) | Err(nix::errno::Errno::EWOULDBLOCK) => Ok(Vec::new()),
+        Err(nix::errno::Errno::EAGAIN) => Ok(Vec::new()),
         Err(e) => Err(TftpError::Tftp(format!("recvmmsg error: {}", e))),
     }
 }
@@ -1042,17 +1048,18 @@ async fn batch_send_packets_internal(
         addrs.push(Some(SockaddrStorage::from(packet.addr)));
     }
 
-    let control_msgs: Vec<Vec<ControlMessage>> = vec![vec![]; packets.len()];
+    // Empty control messages (shared across all messages)
+    let control_msgs: &[ControlMessage] = &[];
 
     match sendmmsg(
         socket_fd,
         &mut MultiHeaders::preallocate(packets.len(), None),
-        &iovecs,
-        &control_msgs,
+        iovecs.iter(),
         &addrs,
+        control_msgs,
         MsgFlags::empty(),
     ) {
-        Ok(sent) => Ok(sent),
+        Ok(sent) => Ok(sent.count()),
         Err(e) => Err(TftpError::Tftp(format!("sendmmsg error: {}", e))),
     }
 }
