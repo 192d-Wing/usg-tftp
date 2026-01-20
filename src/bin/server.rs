@@ -336,6 +336,38 @@ fn create_optimized_socket(bind_addr: SocketAddr, config: &SocketConfig) -> Resu
     Ok(tokio_socket)
 }
 
+/// Creates a per-transfer socket with the correct address family for IPv4/IPv6 support
+///
+/// This is a lightweight version of create_optimized_socket for ephemeral
+/// per-transfer sockets that don't need all the optimization flags.
+fn create_transfer_socket(bind_addr: SocketAddr) -> Result<UdpSocket> {
+    let domain = if bind_addr.is_ipv4() {
+        Domain::IPV4
+    } else {
+        Domain::IPV6
+    };
+
+    let socket = Socket::new(domain, Type::DGRAM, Some(Protocol::UDP))
+        .map_err(|e| TftpError::Tftp(format!("Failed to create transfer socket: {}", e)))?;
+
+    // Bind the socket
+    socket
+        .bind(&bind_addr.into())
+        .map_err(|e| TftpError::Tftp(format!("Failed to bind transfer socket to {}: {}", bind_addr, e)))?;
+
+    // Set non-blocking mode for tokio
+    socket
+        .set_nonblocking(true)
+        .map_err(|e| TftpError::Tftp(format!("Failed to set non-blocking: {}", e)))?;
+
+    // Convert socket2::Socket to std::net::UdpSocket, then to tokio::net::UdpSocket
+    let std_socket: std::net::UdpSocket = socket.into();
+    let tokio_socket = UdpSocket::from_std(std_socket)
+        .map_err(|e| TftpError::Tftp(format!("Failed to convert to tokio socket: {}", e)))?;
+
+    Ok(tokio_socket)
+}
+
 #[derive(Parser, Debug)]
 #[command(name = "snow-owl-tftp", about = "Standalone TFTP server")]
 struct Cli {
@@ -929,7 +961,13 @@ impl TftpServer {
                         );
 
                         // Create a response socket for this client
-                        let response_socket = Arc::new(UdpSocket::bind("0.0.0.0:0").await?);
+                        // Use IPv6 unspecified if client is IPv6, IPv4 otherwise (dual-stack support)
+                        let bind_addr = if client_addr.is_ipv6() {
+                            SocketAddr::new(std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0)
+                        } else {
+                            SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0)
+                        };
+                        let response_socket = Arc::new(create_transfer_socket(bind_addr)?);
                         response_socket.connect(client_addr).await?;
 
                         // Delegate to multicast server
@@ -1325,7 +1363,13 @@ impl TftpServer {
     ) -> Result<()> {
         let start_time = std::time::Instant::now();
         // RFC 1350: Each transfer connection uses a new TID (Transfer ID)
-        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        // Use IPv6 unspecified if client is IPv6, IPv4 otherwise (dual-stack support)
+        let bind_addr = if client_addr.is_ipv6() {
+            SocketAddr::new(std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0)
+        } else {
+            SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0)
+        };
+        let socket = create_transfer_socket(bind_addr)?;
         socket.connect(client_addr).await?;
 
         // Open and validate file
@@ -1835,7 +1879,13 @@ impl TftpServer {
         let start_time = std::time::Instant::now();
 
         // RFC 1350: Each transfer connection uses a new TID (Transfer ID)
-        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        // Use IPv6 unspecified if client is IPv6, IPv4 otherwise (dual-stack support)
+        let bind_addr = if client_addr.is_ipv6() {
+            SocketAddr::new(std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0)
+        } else {
+            SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0)
+        };
+        let socket = create_transfer_socket(bind_addr)?;
         socket.connect(client_addr).await?;
 
         // Audit log: Write started
@@ -2537,7 +2587,13 @@ impl TftpServer {
         error_code: TftpErrorCode,
         message: &str,
     ) -> Result<()> {
-        let socket = UdpSocket::bind("0.0.0.0:0").await?;
+        // Use IPv6 unspecified if client is IPv6, IPv4 otherwise (dual-stack support)
+        let bind_addr = if client_addr.is_ipv6() {
+            SocketAddr::new(std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0)
+        } else {
+            SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0)
+        };
+        let socket = create_transfer_socket(bind_addr)?;
         socket.connect(client_addr).await?;
         Self::send_error_on_socket(&socket, error_code, message).await
     }
