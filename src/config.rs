@@ -576,9 +576,10 @@ pub struct PerformanceConfig {
     pub default_block_size: usize,
 
     /// Default window size for RFC 7440 sliding window (blocks)
-    /// RFC 7440: Valid range 1-65535, default 1 for RFC 1350 compatibility
-    /// Higher values improve throughput on high-latency networks
-    /// Recommended: 4-16 for typical networks, 32+ for high-latency links
+    /// RFC 7440: Valid range 1-65535
+    /// Default 8 provides 8x throughput improvement vs RFC 1350 (windowsize=1)
+    /// Clients can negotiate different values; legacy RFC 1350 clients use windowsize=1 automatically
+    /// Recommended: 4-8 for LANs, 8-16 for WANs, 16-32 for high-latency links
     pub default_windowsize: usize,
 
     /// Buffer pool size for packet reuse
@@ -603,7 +604,7 @@ impl Default for PerformanceConfig {
     fn default() -> Self {
         Self {
             default_block_size: 8192, // 8KB for better throughput
-            default_windowsize: 1,    // RFC 1350 compatible (stop-and-wait)
+            default_windowsize: 8,    // RFC 7440: 8x better performance, backward compatible
             buffer_pool_size: 128,
             streaming_threshold: 1_048_576, // 1MB
             audit_sampling_rate: 1.0,       // Log everything by default
