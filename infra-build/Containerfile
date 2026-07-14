@@ -1,0 +1,29 @@
+FROM rust:1-trixie AS builder
+
+WORKDIR /build
+
+COPY Cargo.toml Cargo.lock ./
+COPY src/ src/
+
+RUN cargo build --release --bin usg-tftp-server --bin usg-tftp-client
+
+FROM registry1.dso.mil/ironbank/redhat/ubi/ubi10:latest
+
+RUN microdnf install -y --nodocs \
+    ca-certificates shadow-utils procps-ng \
+    && microdnf clean all
+
+RUN groupadd --system tftp && useradd --system --gid tftp --no-create-home tftp
+
+RUN mkdir -p /var/lib/usg-tftp/tftp /var/log/usg-tftp /etc/usg-tftp \
+    && chown -R tftp:tftp /var/lib/usg-tftp /var/log/usg-tftp /etc/usg-tftp
+
+COPY --from=builder /build/target/release/usg-tftp-server /usr/local/bin/
+COPY --from=builder /build/target/release/usg-tftp-client /usr/local/bin/
+
+EXPOSE 69/udp
+
+USER tftp
+
+ENTRYPOINT ["usg-tftp-server"]
+CMD ["--config", "/etc/usg-tftp/tftp.toml", "--create-root-dir"]
