@@ -1,0 +1,77 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "usg-tftp.fullname" . }}-config
+  labels:
+    {{- include "usg-tftp.labels" . | nindent 4 }}
+data:
+  tftp.toml: |
+    root_dir = {{ .Values.config.rootDir | quote }}
+    bind_addr = {{ .Values.config.bindAddr | quote }}
+    max_file_size_bytes = {{ int64 .Values.config.maxFileSizeBytes }}
+
+    [logging]
+    level = {{ .Values.config.logging.level | quote }}
+    format = {{ .Values.config.logging.format | quote }}
+    {{- if .Values.config.logging.file }}
+    file = {{ .Values.config.logging.file | quote }}
+    {{- end }}
+    audit_enabled = {{ .Values.config.logging.auditEnabled }}
+
+    [write_config]
+    enabled = {{ .Values.config.write.enabled }}
+    allow_overwrite = {{ .Values.config.write.allowOverwrite }}
+    allowed_patterns = [{{ range $i, $p := .Values.config.write.allowedPatterns }}{{ if $i }}, {{ end }}{{ $p | quote }}{{ end }}]
+
+    [multicast]
+    enabled = {{ .Values.config.multicast.enabled }}
+    {{- if .Values.config.multicast.enabled }}
+    multicast_addr = {{ .Values.config.multicast.multicastAddr | quote }}
+    multicast_ip_version = {{ .Values.config.multicast.multicastIpVersion | quote }}
+    multicast_port = {{ .Values.config.multicast.multicastPort }}
+    max_clients = {{ .Values.config.multicast.maxClients }}
+    master_timeout_secs = {{ .Values.config.multicast.masterTimeoutSecs }}
+    retransmit_timeout_secs = {{ .Values.config.multicast.retransmitTimeoutSecs }}
+    {{- end }}
+
+    [performance]
+    default_block_size = {{ .Values.config.performance.defaultBlockSize }}
+    default_windowsize = {{ .Values.config.performance.defaultWindowSize }}
+    buffer_pool_size = {{ .Values.config.performance.bufferPoolSize }}
+    streaming_threshold = {{ int64 .Values.config.performance.streamingThreshold }}
+    audit_sampling_rate = {{ .Values.config.performance.auditSamplingRate }}
+
+    [performance.platform.socket]
+    recv_buffer_kb = {{ .Values.config.performance.socket.recvBufferKb }}
+    send_buffer_kb = {{ .Values.config.performance.socket.sendBufferKb }}
+    reuse_address = {{ .Values.config.performance.socket.reuseAddress }}
+    reuse_port = {{ .Values.config.performance.socket.reusePort }}
+
+    [performance.platform.file_io]
+    use_sequential_hint = {{ .Values.config.performance.fileIo.useSequentialHint }}
+    use_willneed_hint = {{ .Values.config.performance.fileIo.useWillneedHint }}
+    fadvise_dontneed_after = {{ .Values.config.performance.fileIo.fadviseDontneedAfter }}
+
+    [performance.platform.batch]
+    enable_sendmmsg = {{ .Values.config.performance.batch.enableSendmmsg }}
+    enable_recvmmsg = {{ .Values.config.performance.batch.enableRecvmmsg }}
+    max_batch_size = {{ .Values.config.performance.batch.maxBatchSize }}
+    batch_timeout_us = {{ .Values.config.performance.batch.batchTimeoutUs }}
+    enable_adaptive_batching = {{ .Values.config.performance.batch.enableAdaptiveBatching }}
+    adaptive_batch_threshold = {{ .Values.config.performance.batch.adaptiveBatchThreshold }}
+
+    [performance.platform.zero_copy]
+    use_sendfile = {{ .Values.config.performance.zeroCopy.useSendfile }}
+    sendfile_threshold_bytes = {{ int64 .Values.config.performance.zeroCopy.sendfileThresholdBytes }}
+    use_msg_zerocopy = {{ .Values.config.performance.zeroCopy.useMsgZerocopy }}
+    msg_zerocopy_threshold_bytes = {{ .Values.config.performance.zeroCopy.msgZerocopyThresholdBytes }}
+
+    [performance.platform.worker_pool]
+    enabled = {{ .Values.config.performance.workerPool.enabled }}
+    {{- if .Values.config.performance.workerPool.workerCount }}
+    worker_count = {{ .Values.config.performance.workerPool.workerCount }}
+    {{- end }}
+    worker_channel_size = {{ .Values.config.performance.workerPool.workerChannelSize }}
+    sender_channel_size = {{ .Values.config.performance.workerPool.senderChannelSize }}
+    load_balance_strategy = {{ .Values.config.performance.workerPool.loadBalanceStrategy | quote }}
+    enable_cpu_affinity = {{ .Values.config.performance.workerPool.enableCpuAffinity }}

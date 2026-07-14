@@ -1,0 +1,462 @@
+# =============================================================================
+# USG-TFTP Helm Chart Values
+# =============================================================================
+# High-performance TFTP server for Kubernetes (k3s / k8s).
+# All values below are defaults — override in your own values file or via
+# --set on the helm install/upgrade command line.
+# =============================================================================
+
+# -- Override the chart name used in resource names.
+nameOverride: ""
+
+# -- Override the full release name used in resource names.
+fullnameOverride: ""
+
+# ---------------------------------------------------------------------------
+# Container Image
+# ---------------------------------------------------------------------------
+image:
+  # -- Container registry and image name.
+  repository: ghcr.io/192d-wing/usg-tftp
+
+  # -- Image pull policy. Use "Always" in CI, "IfNotPresent" for stable tags.
+  pullPolicy: IfNotPresent
+
+  # -- Image tag. Defaults to the chart's appVersion if left empty.
+  tag: ""
+
+# -- Secrets for pulling images from private registries.
+# Example:
+#   imagePullSecrets:
+#     - name: my-registry-secret
+imagePullSecrets: []
+
+# ---------------------------------------------------------------------------
+# Replicas & Update Strategy
+# ---------------------------------------------------------------------------
+
+# -- Number of server pods. TFTP is stateless per-transfer, so horizontal
+# scaling is safe. Each pod binds its own ephemeral ports for data channels.
+replicaCount: 1
+
+# -- Update strategy. "Recreate" avoids UDP port conflicts during rollouts.
+# Use "RollingUpdate" only if your Service type supports session draining.
+strategy:
+  type: Recreate
+
+# ---------------------------------------------------------------------------
+# Service Account
+# ---------------------------------------------------------------------------
+serviceAccount:
+  # -- Create a dedicated ServiceAccount for the TFTP pods.
+  create: true
+
+  # -- Annotations to add to the ServiceAccount (e.g. for IAM role binding).
+  annotations: {}
+
+  # -- Override the ServiceAccount name. Defaults to the release fullname.
+  name: ""
+
+  # -- Automount the service account token into pods.
+  # Disable if the server doesn't need Kubernetes API access (it doesn't).
+  automount: false
+
+# ---------------------------------------------------------------------------
+# Pod-Level Settings
+# ---------------------------------------------------------------------------
+
+# -- Extra annotations on every Pod (e.g. Prometheus scrape config).
+podAnnotations: {}
+
+# -- Extra labels on every Pod.
+podLabels: {}
+
+# -- Pod security context (applies to the whole pod).
+# The defaults below drop all capabilities and use a read-only root filesystem.
+podSecurityContext:
+  fsGroup: 1000
+
+# -- Container security context.
+securityContext:
+  readOnlyRootFilesystem: true
+  runAsNonRoot: true
+  runAsUser: 1000
+  runAsGroup: 1000
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+      - ALL
+    add:
+      # NET_BIND_SERVICE lets the non-root user bind UDP port 69.
+      - NET_BIND_SERVICE
+
+# ---------------------------------------------------------------------------
+# Service (Network)
+# ---------------------------------------------------------------------------
+service:
+  # -- Service type. Options:
+  #   "ClusterIP"  — internal only (use with an Ingress/Gateway or port-forward)
+  #   "NodePort"   — exposes a static port on every node (good for k3s / bare-metal)
+  #   "LoadBalancer" — provisions a cloud LB (cloud providers or MetalLB)
+  type: NodePort
+
+  # -- TFTP listen port on the Service (UDP).
+  port: 69
+
+  # -- Node port to allocate when service.type is "NodePort".
+  # Valid range: 30000-32767. Leave null to let Kubernetes pick one.
+  # Set to 69 only if your cluster allows privileged node ports.
+  nodePort: null
+
+  # -- Extra annotations on the Service (e.g. MetalLB address pool,
+  # cloud LB internal flag, health-check config).
+  annotations: {}
+
+  # -- Load balancer IP. Only used when service.type is "LoadBalancer".
+  # Set this to pin a stable IP (e.g. MetalLB, cloud static IP).
+  loadBalancerIP: ""
+
+  # -- Restrict load balancer source ranges (CIDR list).
+  # Example: ["10.0.0.0/8", "172.16.0.0/12"]
+  loadBalancerSourceRanges: []
+
+  # -- External traffic policy. "Local" preserves client source IPs (important
+  # for TFTP access logging) but may cause uneven load distribution.
+  # "Cluster" distributes evenly but SNATs client IPs.
+  externalTrafficPolicy: Local
+
+# -- Use hostNetwork mode. Binds the pod directly to the node's network
+# namespace so TFTP listens on the node's own IP:69. Useful on bare-metal
+# or k3s where UDP load balancing is unavailable. Mutually exclusive with
+# most Service types. Only one pod per node when enabled.
+hostNetwork: false
+
+# -- Host port mapping. An alternative to hostNetwork that only forwards
+# the TFTP port. Requires the container port to match.
+# Set to 69 to map node:69 → container:69.
+hostPort: null
+
+# ---------------------------------------------------------------------------
+# TFTP Server Configuration (generates /etc/usg-tftp/tftp.toml)
+# ---------------------------------------------------------------------------
+config:
+  # -- Root directory inside the container where TFTP files are served from.
+  # This is the path the PVC or volume mount will be attached to.
+  rootDir: /var/lib/usg-tftp/tftp
+
+  # -- Bind address inside the container. Use "[::]:69" for dual-stack
+  # (IPv4+IPv6), or "0.0.0.0:69" for IPv4-only.
+  bindAddr: "0.0.0.0:69"
+
+  # -- Maximum file size the server will serve, in bytes.
+  # Default: 104857600 (100 MB). Set to 0 for unlimited (not recommended).
+  maxFileSizeBytes: 104857600
+
+  # -- Logging configuration.
+  logging:
+    # -- Log level: trace, debug, info, warn, error.
+    level: info
+
+    # -- Log format: "json" for structured SIEM-ready logs, "text" for human-readable.
+    format: json
+
+    # -- Path to the log file inside the container. Set to null to log only to stdout.
+    file: /var/log/usg-tftp/tftp-audit.json
+
+    # -- Enable structured audit logging for SIEM integration.
+    # When true, all security-relevant events (reads, writes, errors) are
+    # logged as structured JSON with correlation IDs.
+    auditEnabled: true
+
+  # -- Write (upload) configuration. Controls whether clients can write files.
+  write:
+    # -- Enable write (WRQ) operations. Disabled by default for security.
+    enabled: false
+
+    # -- Allow overwriting existing files. When false, returns
+    # "File already exists" error per RFC 1350.
+    allowOverwrite: false
+
+    # -- Glob patterns restricting which filenames may be written.
+    # At least one pattern is required when writes are enabled.
+    # Examples: ["*.cfg", "firmware/*.bin", "configs/*.txt"]
+    allowedPatterns: []
+
+  # -- Multicast TFTP configuration (RFC 2090).
+  # Allows a single server read to serve multiple clients simultaneously.
+  multicast:
+    # -- Enable multicast TFTP support.
+    enabled: false
+
+    # -- Multicast group address. Use an administratively-scoped address.
+    # IPv6 default: "ff12::8000:1"  |  IPv4 default: "224.0.1.1"
+    multicastAddr: "224.0.1.1"
+
+    # -- IP version for multicast: "v4" or "v6".
+    multicastIpVersion: v4
+
+    # -- UDP port for multicast data channel. Must be in range 1024-65535.
+    multicastPort: 1758
+
+    # -- Maximum concurrent clients per multicast session.
+    maxClients: 10
+
+    # -- Seconds before a multicast master client is considered timed out.
+    masterTimeoutSecs: 30
+
+    # -- Seconds between multicast retransmissions.
+    retransmitTimeoutSecs: 5
+
+  # -- Performance tuning. These control throughput optimizations.
+  performance:
+    # -- Default block size in bytes. RFC 1350 standard is 512, but 8192
+    # provides significantly better throughput. Clients negotiate via RFC 2348.
+    defaultBlockSize: 8192
+
+    # -- Default window size (RFC 7440 sliding window). Higher values improve
+    # throughput on high-latency links. Range: 1-65535.
+    # 1 = RFC 1350 stop-and-wait compatibility.
+    defaultWindowSize: 1
+
+    # -- Buffer pool size for packet object reuse. Larger pools reduce
+    # heap allocations but consume more baseline memory.
+    bufferPoolSize: 128
+
+    # -- Files larger than this (bytes) use streaming mode to cap memory.
+    # Smaller files are fully buffered for NETASCII conversion.
+    streamingThreshold: 1048576
+
+    # -- Audit log sampling rate (0.0-1.0).
+    # 1.0 = log every event, 0.1 = sample 10%. Reduce for high-volume servers.
+    auditSamplingRate: 1.0
+
+    # -- Platform-specific socket tuning.
+    socket:
+      # -- Receive buffer size in KB (SO_RCVBUF). Larger values reduce packet
+      # drops under high concurrency. Default: 2048 KB (2 MB).
+      recvBufferKb: 2048
+
+      # -- Send buffer size in KB (SO_SNDBUF). Larger values improve burst
+      # handling. Default: 2048 KB (2 MB).
+      sendBufferKb: 2048
+
+      # -- Enable SO_REUSEADDR for faster server restarts.
+      reuseAddress: true
+
+      # -- Enable SO_REUSEPORT for multi-process scaling (Linux 3.9+).
+      # Allows multiple pods on the same node to share a port when using
+      # hostNetwork mode.
+      reusePort: true
+
+    # -- File I/O optimization hints (Linux/BSD only).
+    fileIo:
+      # -- POSIX_FADV_SEQUENTIAL hint: optimizes kernel read-ahead for
+      # sequential file access patterns.
+      useSequentialHint: true
+
+      # -- POSIX_FADV_WILLNEED hint: prefetches file data to reduce I/O wait.
+      useWillneedHint: true
+
+      # -- POSIX_FADV_DONTNEED: free page cache after transfer.
+      # Good for large one-shot files, bad for frequently re-read files.
+      fadviseDontneedAfter: false
+
+    # -- Batch packet operations (Linux 3.0+ / FreeBSD 11.0+).
+    # Uses sendmmsg()/recvmmsg() to reduce per-packet syscall overhead.
+    batch:
+      # -- Enable sendmmsg() for batched outgoing packets.
+      enableSendmmsg: true
+
+      # -- Enable recvmmsg() for batched incoming packets.
+      enableRecvmmsg: true
+
+      # -- Max packets per batch syscall. Higher = less overhead, more latency.
+      maxBatchSize: 32
+
+      # -- Max wait time for batching (microseconds).
+      batchTimeoutUs: 100
+
+      # -- Automatically disable batching when few clients are connected
+      # to avoid single-client latency regression.
+      enableAdaptiveBatching: true
+
+      # -- Client count threshold for enabling batch receiving.
+      adaptiveBatchThreshold: 5
+
+    # -- Zero-copy transfer optimizations (Linux only).
+    zeroCopy:
+      # -- Use sendfile() to eliminate user-space buffer copies.
+      useSendfile: true
+
+      # -- Minimum file size (bytes) to trigger sendfile().
+      # Files below this threshold use normal buffered I/O.
+      sendfileThresholdBytes: 65536
+
+      # -- Use MSG_ZEROCOPY send flag (Linux 4.14+, experimental).
+      useMsgZerocopy: false
+
+      # -- Minimum block size (bytes) for MSG_ZEROCOPY.
+      msgZerocopyThresholdBytes: 8192
+
+    # -- Worker thread pool (Phase 4, NGINX-style multi-core architecture).
+    workerPool:
+      # -- Enable the worker thread pool. When false, uses single-threaded
+      # Tokio architecture (still async, just one OS thread for I/O).
+      enabled: false
+
+      # -- Number of worker threads. 0 = auto-detect (CPU cores - 2, min 1, max 8).
+      workerCount: 0
+
+      # -- Channel buffer size between master and each worker (packets).
+      workerChannelSize: 256
+
+      # -- Shared channel buffer between all workers and the sender thread (packets).
+      senderChannelSize: 512
+
+      # -- Load balancing strategy across workers:
+      #   "round_robin"  — simple rotation (best for uniform workloads)
+      #   "client_hash"  — hash client address for session affinity
+      #   "least_loaded" — route to shortest queue (best for variable workloads)
+      loadBalanceStrategy: round_robin
+
+      # -- Pin each worker thread to a CPU core (Linux only).
+      # Improves cache locality but reduces scheduler flexibility.
+      enableCpuAffinity: false
+
+# ---------------------------------------------------------------------------
+# Persistence (TFTP file storage)
+# ---------------------------------------------------------------------------
+persistence:
+  # -- Enable persistent storage for the TFTP root directory.
+  # When disabled, files must be provided via an initContainer, a ConfigMap,
+  # or an external volume mount (see extraVolumes/extraVolumeMounts).
+  enabled: false
+
+  # -- Storage class name. Use "" for the cluster default, or specify one:
+  #   k3s default: "local-path"
+  #   Longhorn:    "longhorn"
+  #   Rook-Ceph:   "rook-ceph-block"
+  storageClassName: ""
+
+  # -- Access mode. "ReadWriteOnce" for single-node, "ReadWriteMany" for
+  # multi-replica deployments (requires an NFS or CephFS-backed StorageClass).
+  accessMode: ReadWriteOnce
+
+  # -- Requested storage size. Size this for your TFTP file set.
+  size: 1Gi
+
+  # -- Use an existing PVC instead of creating one. Leave empty to create a new PVC.
+  existingClaim: ""
+
+  # -- Annotations on the PersistentVolumeClaim.
+  annotations: {}
+
+# ---------------------------------------------------------------------------
+# Resources
+# ---------------------------------------------------------------------------
+
+# -- CPU and memory resource requests/limits for the TFTP container.
+# Adjust based on expected concurrency and file sizes.
+# Example:
+#   resources:
+#     requests:
+#       cpu: 100m
+#       memory: 128Mi
+#     limits:
+#       cpu: "1"
+#       memory: 512Mi
+resources: {}
+
+# ---------------------------------------------------------------------------
+# Probes
+# ---------------------------------------------------------------------------
+
+# -- Liveness probe. TFTP (UDP) has no built-in health endpoint, so we use
+# an exec probe that checks whether the server process is running.
+livenessProbe:
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - pgrep -x usg-tftp-server
+  initialDelaySeconds: 5
+  periodSeconds: 30
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# -- Readiness probe. Same check — the pod should receive traffic only
+# when the server process is alive.
+readinessProbe:
+  exec:
+    command:
+      - /bin/sh
+      - -c
+      - pgrep -x usg-tftp-server
+  initialDelaySeconds: 3
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+# ---------------------------------------------------------------------------
+# Scheduling
+# ---------------------------------------------------------------------------
+
+# -- Node selector labels. Place TFTP pods on specific nodes.
+# Example:
+#   nodeSelector:
+#     kubernetes.io/os: linux
+#     node-role.kubernetes.io/tftp: "true"
+nodeSelector: {}
+
+# -- Tolerations for tainted nodes.
+# Example:
+#   tolerations:
+#     - key: "dedicated"
+#       operator: "Equal"
+#       value: "tftp"
+#       effect: "NoSchedule"
+tolerations: []
+
+# -- Affinity rules. Use anti-affinity to spread replicas across nodes.
+# Example (spread across nodes):
+#   affinity:
+#     podAntiAffinity:
+#       preferredDuringSchedulingIgnoredDuringExecution:
+#         - weight: 100
+#           podAffinityTerm:
+#             labelSelector:
+#               matchExpressions:
+#                 - key: app.kubernetes.io/name
+#                   operator: In
+#                   values: ["usg-tftp"]
+#             topologyKey: kubernetes.io/hostname
+affinity: {}
+
+# ---------------------------------------------------------------------------
+# Extra Volumes & Mounts
+# ---------------------------------------------------------------------------
+
+# -- Additional volumes to attach to the pod (e.g. pre-populated ConfigMaps,
+# Secrets, hostPath mounts for boot images).
+# Example:
+#   extraVolumes:
+#     - name: boot-images
+#       hostPath:
+#         path: /srv/tftp
+#         type: Directory
+extraVolumes: []
+
+# -- Additional volume mounts for the TFTP container.
+# Example:
+#   extraVolumeMounts:
+#     - name: boot-images
+#       mountPath: /var/lib/usg-tftp/tftp/boot
+#       readOnly: true
+extraVolumeMounts: []
+
+# -- Additional environment variables for the TFTP container.
+# Example:
+#   extraEnv:
+#     - name: RUST_LOG
+#       value: "debug"
+extraEnv: []

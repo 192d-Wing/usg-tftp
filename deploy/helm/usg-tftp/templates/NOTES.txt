@@ -1,0 +1,39 @@
+USG-TFTP has been deployed.
+
+{{- if .Values.hostNetwork }}
+
+  The server is using hostNetwork mode.
+  TFTP is available at <node-ip>:{{ .Values.config.bindAddr | regexFind "[0-9]+$" }}
+
+{{- else if eq .Values.service.type "NodePort" }}
+
+  Get the TFTP node port:
+
+    export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "usg-tftp.fullname" . }})
+    export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+    echo "TFTP server: $NODE_IP:$NODE_PORT"
+
+{{- else if eq .Values.service.type "LoadBalancer" }}
+
+  It may take a few minutes for the LoadBalancer IP to be available.
+  Watch the status:
+
+    kubectl get --namespace {{ .Release.Namespace }} svc -w {{ include "usg-tftp.fullname" . }}
+
+{{- else if eq .Values.service.type "ClusterIP" }}
+
+  The TFTP server is only accessible within the cluster at:
+
+    {{ include "usg-tftp.fullname" . }}.{{ .Release.Namespace }}.svc.cluster.local:{{ .Values.service.port }}
+
+  To test from your workstation, use port-forward (note: kubectl port-forward does not support UDP natively):
+
+    kubectl --namespace {{ .Release.Namespace }} port-forward svc/{{ include "usg-tftp.fullname" . }} 6969:{{ .Values.service.port }}
+
+{{- end }}
+
+{{- if not .Values.persistence.enabled }}
+
+  WARNING: Persistence is disabled. TFTP files will not survive pod restarts.
+  Enable persistence or mount an external volume via extraVolumes.
+{{- end }}

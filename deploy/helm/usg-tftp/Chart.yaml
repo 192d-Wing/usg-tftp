@@ -1,0 +1,16 @@
+apiVersion: v2
+name: usg-tftp
+description: A high-performance TFTP server with RFC 2347/2348/2349/7440 support
+type: application
+version: 0.1.0
+appVersion: "0.1.0"
+keywords:
+  - tftp
+  - networking
+  - pxe
+  - boot
+home: https://github.com/192d-Wing/usg-tftp
+sources:
+  - https://github.com/192d-Wing/usg-tftp
+maintainers:
+  - name: USG TFTP Contributors
