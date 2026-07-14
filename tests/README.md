@@ -1,6 +1,6 @@
 # TFTP Test Suite
 
-Comprehensive automated tests for the Snow-Owl TFTP server, including integration tests and RFC 7440 windowsize tests.
+Comprehensive automated tests for the USG-TFTP TFTP server, including integration tests and RFC 7440 windowsize tests.
 
 ## Quick Start
 
@@ -53,23 +53,27 @@ cargo build --release
 Core TFTP functionality and RFC compliance tests.
 
 ✅ **Basic Operations**
+
 - Read requests (RRQ)
 - Write requests (WRQ)
 - Large file transfers
 - NETASCII mode transfers
 
 ✅ **RFC Compliance**
+
 - Path traversal protection
 - Transfer size validation
 - Timeout handling
 - Option negotiation
 
 ✅ **Security Controls**
+
 - Write pattern validation (allowed/denied)
 - Access control enforcement
 - Audit logging
 
 ✅ **Performance**
+
 - Concurrent transfers
 - Sequential transfers
 - File integrity (MD5 checksums)
@@ -79,6 +83,7 @@ Core TFTP functionality and RFC compliance tests.
 RFC 7440 windowsize option testing with 32 comprehensive test cases.
 
 ✅ **Windowsize Values**
+
 - Tests 1-8: Small file (1KB) with windowsize 1-8
 - Tests 9-16: Medium file (10KB) with windowsize 1, 2, 4, 8, 12, 16, 24, 32
 - Tests 17-24: Large file (100KB) with windowsize 1, 2, 4, 8, 16, 32, 48, 64
@@ -87,6 +92,7 @@ RFC 7440 windowsize option testing with 32 comprehensive test cases.
 - Tests 31-32: Exact window boundary cases
 
 ✅ **Performance Metrics**
+
 - Transfer time measurement
 - Throughput calculation (Mbps)
 - Packet and ACK counting
@@ -111,6 +117,7 @@ Advanced Python-based testing with detailed metrics:
 ```
 
 **Metrics provided:**
+
 - Transfer time and throughput
 - Total packets and ACKs
 - Retransmission rate
@@ -129,7 +136,7 @@ Example output:
 
 ```
 ================================================
-  Snow-Owl TFTP Integration Tests
+  USG-TFTP TFTP Integration Tests
 ================================================
 
 Setting up test environment...
@@ -391,4 +398,4 @@ When adding new features, please:
 
 ## License
 
-Same as Snow-Owl project (MIT OR Apache-2.0)
+Same as USG-TFTP project (MIT OR Apache-2.0)

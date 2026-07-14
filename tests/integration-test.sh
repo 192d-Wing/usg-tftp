@@ -49,7 +49,7 @@ trap cleanup EXIT
 # Print header
 print_header() {
     echo -e "${BLUE}================================================${NC}"
-    echo -e "${BLUE}  Snow-Owl TFTP Integration Tests${NC}"
+    echo -e "${BLUE}  USG-TFTP TFTP Integration Tests${NC}"
     echo -e "${BLUE}================================================${NC}"
     echo ""
 }
@@ -827,7 +827,7 @@ main() {
     setup_test_env
 
     # Initialize results file (after TEST_DIR is created)
-    echo "Snow-Owl TFTP Integration Test Results" > "$RESULTS_FILE"
+    echo "USG-TFTP TFTP Integration Test Results" > "$RESULTS_FILE"
     echo "=======================================" >> "$RESULTS_FILE"
     echo "Date: $(date)" >> "$RESULTS_FILE"
     echo "" >> "$RESULTS_FILE"

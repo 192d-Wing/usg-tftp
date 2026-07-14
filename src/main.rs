@@ -350,7 +350,7 @@ fn create_optimized_socket(bind_addr: SocketAddr, config: &SocketConfig) -> Resu
 #[command(name = "usg-tftp", about = "Standalone TFTP server")]
 struct Cli {
     /// Path to the TOML configuration file
-    #[arg(long, default_value = "/etc/snow-owl/tftp.toml")]
+    #[arg(long, default_value = "/etc/usg-tftp/tftp.toml")]
     config: PathBuf,
 
     /// Write a default TOML configuration file and exit

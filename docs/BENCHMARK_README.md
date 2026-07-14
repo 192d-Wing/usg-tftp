@@ -10,7 +10,7 @@ The `benchmark-phase2.sh` script provides comprehensive performance testing for 
 
 ```bash
 # From container
-cd /path/to/Snow-Owl/crates/usg-tftp
+cd /path/to/USG-TFTP/crates/usg-tftp
 sudo ./benchmark-phase2.sh
 ```
 
@@ -24,12 +24,14 @@ sudo ./benchmark-phase2.sh
 ## Prerequisites
 
 The script will automatically check for and install (on Debian/Ubuntu):
+
 - `cargo` - Rust toolchain (must be pre-installed)
 - `tftp` - TFTP client for testing
 - `strace` - System call tracer for measuring syscall overhead
 - `bc` - Calculator for performance metrics
 
 **Minimum Requirements:**
+
 - Linux 2.6.33+ (for recvmmsg support)
 - Root privileges or CAP_SYS_PTRACE for strace
 
@@ -40,6 +42,7 @@ The script will automatically check for and install (on Debian/Ubuntu):
 Tests the primary improvement of Phase 2: reduction in syscall count.
 
 **Test Procedure:**
+
 - Starts server with batch operations **disabled**
 - Performs concurrent transfers under strace
 - Counts recvfrom/sendto calls
@@ -53,6 +56,7 @@ Tests the primary improvement of Phase 2: reduction in syscall count.
 Measures raw transfer performance.
 
 **Test Procedure:**
+
 - Single large file (10 MB) transfer
 - Measures MB/s throughput
 - Compares with and without batch operations
@@ -64,6 +68,7 @@ Measures raw transfer performance.
 Measures performance under concurrent load.
 
 **Test Procedure:**
+
 - 10 concurrent clients transferring 100 KB files
 - Measures total completion time
 - Compares with and without batch operations
@@ -75,6 +80,7 @@ Measures performance under concurrent load.
 ### Terminal Output
 
 The script provides colored, real-time progress:
+
 - ✓ Success messages in green
 - ✗ Error messages in red
 - ℹ Info messages in blue
@@ -109,7 +115,7 @@ The main report (`benchmark-report.txt`) includes:
 
 ```
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Snow-Owl TFTP Phase 2 Benchmark Results
+  USG-TFTP TFTP Phase 2 Benchmark Results
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Syscall Overhead Comparison:
@@ -178,6 +184,7 @@ source $HOME/.cargo/env
 ### Server fails to start
 
 **Check:**
+
 1. Port 6969 is not already in use: `netstat -ln | grep 6969`
 2. Server logs in `benchmark-test/results/server-*.log`
 3. Config files are valid TOML
@@ -185,6 +192,7 @@ source $HOME/.cargo/env
 ### Transfers timeout
 
 **Check:**
+
 1. Firewall rules allow UDP port 6969
 2. Server is actually running: `ps aux | grep usg-tftp`
 3. Increase timeout or reduce file sizes
@@ -245,6 +253,7 @@ jobs:
 ## Support
 
 For issues or questions:
+
 1. Check server logs in `benchmark-test/results/`
 2. Review strace output for syscall patterns
 3. Verify kernel version supports recvmmsg (2.6.33+)

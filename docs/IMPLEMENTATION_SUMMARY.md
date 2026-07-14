@@ -1,6 +1,6 @@
 # Performance Optimizations Implementation Summary
 
-## Snow-Owl TFTP Server - Linux/BSD Performance Enhancements
+## USG-TFTP TFTP Server - Linux/BSD Performance Enhancements
 
 **Date:** 2026-01-20
 **Version:** 1.0
@@ -579,4 +579,4 @@ The implementation is solid and ready for real-world testing. Phase 3 (io_uring)
 
 **Document Version:** 1.0
 **Last Updated:** 2026-01-19
-**Authors:** Claude Sonnet 4.5 (Implementation), Snow-Owl Team (Review)
+**Authors:** Claude Sonnet 4.5 (Implementation), USG-TFTP Team (Review)

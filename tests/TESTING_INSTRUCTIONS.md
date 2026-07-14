@@ -2,7 +2,7 @@
 
 ## Overview
 
-We've created comprehensive RFC 7440 windowsize tests (tests 1-32) for the Snow-Owl TFTP implementation. This document provides instructions for running these tests.
+We've created comprehensive RFC 7440 windowsize tests (tests 1-32) for the USG-TFTP TFTP implementation. This document provides instructions for running these tests.
 
 ## What Was Created
 
@@ -31,7 +31,7 @@ python3 --version
 
 ```bash
 # Navigate to project root
-cd /home/jwillman/projects/snow-owl
+cd /home/jwillman/projects/usg-tftp
 
 # Build the server
 cargo build --release --bin usg-tftp-server
@@ -45,11 +45,12 @@ ls -lh target/release/usg-tftp-server
 ### Option 1: Run All Tests (Recommended)
 
 ```bash
-cd /home/jwillman/projects/snow-owl/crates/usg-tftp
+cd /home/jwillman/projects/usg-tftp/crates/usg-tftp
 ./tests/run-all-tests.sh
 ```
 
 This will:
+
 - Check prerequisites (atftp, md5sum, etc.)
 - Build the project
 - Run integration tests
@@ -59,14 +60,15 @@ This will:
 ### Option 2: Run Only Windowsize Tests
 
 ```bash
-cd /home/jwillman/projects/snow-owl/crates/usg-tftp
+cd /home/jwillman/projects/usg-tftp/crates/usg-tftp
 ./tests/windowsize-test.sh
 ```
 
 Expected output:
+
 ```
 ================================================
-  Snow-Owl TFTP Windowsize Tests (RFC 7440)
+  USG-TFTP TFTP Windowsize Tests (RFC 7440)
 ================================================
 
 Setting up test environment...
@@ -96,7 +98,7 @@ All tests passed!
 ### Option 3: Python Performance Analyzer
 
 ```bash
-cd /home/jwillman/projects/snow-owl/crates/usg-tftp
+cd /home/jwillman/projects/usg-tftp/crates/usg-tftp
 
 # Quick test (windowsize 1-8 with medium file)
 ./tests/windowsize-analyzer.py quick
@@ -109,8 +111,9 @@ cd /home/jwillman/projects/snow-owl/crates/usg-tftp
 ```
 
 Expected output:
+
 ```
-Snow-Owl TFTP Windowsize Analyzer (RFC 7440)
+USG-TFTP TFTP Windowsize Analyzer (RFC 7440)
 ============================================================
 
 Performance Test: Large file with various windowsizes
@@ -172,12 +175,14 @@ default_windowsize = 16
 Based on the codebase review, the TFTP server has:
 
 ✅ **Windowsize support implemented**
+
 - `PerformanceConfig::default_windowsize` - Default: 1 (RFC 1350 compatible)
 - RFC 7440 sliding window protocol
 - Valid range: 1-65535
 - Configurable per deployment
 
 ✅ **Performance optimizations**
+
 - Large block sizes (default 8192 bytes)
 - Buffer pooling
 - Platform-specific optimizations (Linux/BSD)
@@ -185,18 +190,21 @@ Based on the codebase review, the TFTP server has:
 ## Expected Test Results
 
 ### Small Windowsize (1-4)
+
 - Lower throughput
 - High ACK overhead
 - Compatible with all clients
 - Good for unreliable networks
 
 ### Medium Windowsize (8-16)
+
 - Balanced performance
 - Recommended for production
 - Good for most networks
 - 5-10x improvement over WS=1
 
 ### Large Windowsize (32-64)
+
 - Maximum throughput
 - Best for high-latency links
 - May increase packet loss on poor networks
@@ -205,11 +213,13 @@ Based on the codebase review, the TFTP server has:
 ## Troubleshooting
 
 ### atftp not found
+
 ```bash
 sudo apt-get install atftp
 ```
 
 ### cargo not found
+
 ```bash
 # Install Rust toolchain
 curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
@@ -217,6 +227,7 @@ source $HOME/.cargo/env
 ```
 
 ### Server fails to start
+
 ```bash
 # Check if port is in use
 sudo netstat -ulnp | grep 6970
@@ -226,11 +237,13 @@ cat /tmp/tftp-windowsize-test-*/logs/tftp.log
 ```
 
 ### Tests timeout
+
 - Increase timeout in test scripts
 - Check firewall settings
 - Verify server is running
 
 ### Permission denied
+
 ```bash
 # Ensure scripts are executable
 chmod +x tests/*.sh
@@ -291,6 +304,7 @@ default_windowsize = 64
 ## Support
 
 For issues or questions:
+
 - Check the troubleshooting section above
 - Review server logs in `/tmp/tftp-windowsize-test-*/logs/`
 - Ensure all prerequisites are installed

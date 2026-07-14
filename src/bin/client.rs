@@ -1,4 +1,4 @@
-// Snow-Owl TFTP Client Binary
+// USG-TFTP TFTP Client Binary
 #![allow(dead_code)]
 
 use usg_tftp::{
@@ -17,7 +17,7 @@ use tokio::net::UdpSocket;
 use tokio::time::timeout;
 use tracing::{debug, info, warn};
 
-/// Snow-Owl TFTP Client
+/// USG-TFTP TFTP Client
 #[derive(Parser, Debug)]
 #[command(name = "usg-tftp-client")]
 #[command(about = "High-performance TFTP client", long_about = None)]

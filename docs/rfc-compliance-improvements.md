@@ -1,6 +1,6 @@
 # RFC Compliance Improvements
 
-This document describes the RFC compliance improvements implemented in the Snow-Owl TFTP server to ensure strict adherence to TFTP protocol standards.
+This document describes the RFC compliance improvements implemented in the USG-TFTP TFTP server to ensure strict adherence to TFTP protocol standards.
 
 ## Overview
 
@@ -270,12 +270,12 @@ cargo build --release
 cargo test
 
 # Audit logs include new validation warnings
-tail -f /var/log/snow-owl/tftp-audit.json
+tail -f /var/log/usg-tftp/tftp-audit.json
 ```
 
 ## Compliance Status
 
-After these improvements, the Snow-Owl TFTP server is fully compliant with:
+After these improvements, the USG-TFTP TFTP server is fully compliant with:
 
 - ✅ **RFC 1350** - The TFTP Protocol (Revision 2)
   - Proper packet handling (RRQ, WRQ, DATA, ACK, ERROR)
@@ -356,4 +356,4 @@ For issues or questions about RFC compliance:
 
 - Open an issue: [GitHub Issues](https://github.com/192d-Wing/usg-tftp/issues)
 - Review test results: `cargo test`
-- Check audit logs: `/var/log/snow-owl/tftp-audit.json`
+- Check audit logs: `/var/log/usg-tftp/tftp-audit.json`

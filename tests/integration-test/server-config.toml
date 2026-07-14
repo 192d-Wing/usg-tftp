@@ -1,11 +1,11 @@
-root_dir = "/home/jwillman/projects/snow-owl/crates/usg-tftp/tests/integration-test/server-root"
+root_dir = "/home/jwillman/projects/usg-tftp/crates/usg-tftp/tests/integration-test/server-root"
 bind_addr = "127.0.0.1:6969"
 max_file_size_bytes = 104857600
 
 [logging]
 level = "info"
 format = "text"
-file = "/home/jwillman/projects/snow-owl/crates/usg-tftp/tests/integration-test/server.log"
+file = "/home/jwillman/projects/usg-tftp/crates/usg-tftp/tests/integration-test/server.log"
 audit_enabled = false
 
 [write_config]

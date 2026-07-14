@@ -1,4 +1,4 @@
-# Snow-Owl TFTP Performance Optimization - Final Results
+# USG-TFTP TFTP Performance Optimization - Final Results
 
 **Date**: 2026-01-19
 **Session**: Phase 2 Batch Operations - recvmmsg() Fix Implementation
@@ -144,6 +144,7 @@ Expected Throughput: +5-10% (localhost), +40-60% (production)
 **Observation**: `sendmmsg_calls=9` proved batch send was working
 
 **Root Cause**:
+
 - **Send path**: Data ready immediately → sendmmsg() succeeds
 - **Receive path**: With MSG_DONTWAIT, if no packets queued at exact moment → EAGAIN → fallback
 - **Solution**: Timeout allows waiting for packets to arrive
@@ -151,6 +152,7 @@ Expected Throughput: +5-10% (localhost), +40-60% (production)
 ### TFTP Protocol Limitations
 
 TFTP uses **stop-and-wait** protocol:
+
 ```
 Client → RRQ
 Server → DATA#1 ← Must wait for ACK
@@ -159,6 +161,7 @@ Server → DATA#2 ← Must wait for ACK
 ```
 
 **Impact on Performance**:
+
 - Each file transfer is strictly serial
 - Batch operations only help with concurrent clients (not single transfer)
 - Maximum theoretical gain from batching alone: 40-50% (not 2x)
@@ -288,12 +291,14 @@ This addresses the fundamental TFTP protocol limitation and provides the biggest
 ## 📝 Technical Artifacts Created
 
 ### Tools
+
 1. **[syscall-counter.bt](../tests/syscall-counter.bt)** - eBPF syscall tracer
    - Traces recvfrom, recvmmsg, sendto, sendmmsg
    - Zero overhead
    - Works with Tokio async runtime
 
 ### Documentation
+
 1. **DEBUG_RECVMMSG.md** - Complete debugging guide and root cause analysis
 2. **PERFORMANCE_OPTIMIZATION_PLAN.md** - Strategic roadmap with architecture designs
 3. **SESSION_SUMMARY.md** - Detailed session overview
@@ -301,6 +306,7 @@ This addresses the fundamental TFTP protocol limitation and provides the biggest
 5. **FINAL_RESULTS.md** - This comprehensive summary
 
 ### Benchmark Integration
+
 - eBPF tracing integrated into [benchmark-phase2.sh](../tests/benchmark-phase2.sh)
 - Automatic syscall counting for each configuration
 - Results parsed and included in reports
@@ -341,11 +347,13 @@ This session successfully:
 ### Expected Impact
 
 **Immediate** (after verification):
+
 - 60-80% syscall reduction (vs current 27%)
 - 40-60% production throughput improvement
 - 20-30% CPU usage reduction
 
 **With RFC 7440 Windowsize** (next optimization):
+
 - 3-5x improvement on localhost
 - 10-20x improvement on WAN
 - Removes fundamental TFTP protocol bottleneck

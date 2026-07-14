@@ -1,4 +1,4 @@
-# Build Status - Snow-Owl TFTP
+# Build Status - USG-TFTP TFTP
 
 **Last Updated:** 2026-01-20
 **Status:** ✅ All Systems Operational
@@ -102,18 +102,21 @@ All warnings are for dead code that will be used in future features or is part o
 **Documentation:** [BENCHMARK_README.md](BENCHMARK_README.md)
 
 **Features:**
+
 - Syscall overhead measurement (strace)
 - Throughput comparison (with/without batch)
 - Concurrent transfer testing (10 clients)
 - Automatic report generation
 
 **Usage:**
+
 ```bash
 cd crates/usg-tftp
 sudo ./benchmark-phase2.sh
 ```
 
 **Requirements:**
+
 - Root privileges (for strace)
 - Linux 2.6.33+ kernel
 - Dependencies: cargo, tftp, strace, bc
@@ -244,16 +247,19 @@ sudo ./benchmark-phase2.sh
 ### Runtime (Production)
 
 **Minimum:**
+
 - Linux 2.6.33+ or FreeBSD 11.0+
 - 512MB RAM
 - UDP port 69 (or alternative port)
 
 **Recommended:**
+
 - Linux 5.10+ (LTS) or FreeBSD 13.0+
 - 2GB+ RAM
 - Multi-core CPU for concurrent transfers
 
 **Optimal:**
+
 - Linux 6.0+ (latest kernel features)
 - 4GB+ RAM
 - Dedicated network interface
@@ -266,6 +272,7 @@ sudo ./benchmark-phase2.sh
 ### Current Implementation (Phase 1 & 2)
 
 **Expected Performance:**
+
 - Throughput: 1GB/s+ on modern hardware
 - Concurrent transfers: 150-200 simultaneous
 - Latency: <1ms for small files
@@ -273,11 +280,13 @@ sudo ./benchmark-phase2.sh
 - Syscall overhead: 60-80% reduction
 
 **Measured Performance:**
+
 - ⏳ Pending benchmarking on Linux system
 
 ### Phase 3 Targets (io_uring)
 
 **Expected Performance:**
+
 - Throughput: 2-3GB/s
 - Concurrent transfers: 1000+
 - Latency: <500µs for small files
@@ -306,7 +315,8 @@ sudo ./benchmark-phase2.sh
 ## Contact
 
 For build issues or questions:
-- GitHub Issues: https://github.com/192d-Wing/Snow-Owl/issues
+
+- GitHub Issues: <https://github.com/192d-Wing/USG-TFTP/issues>
 - Label: `build` + `tftp`
 
 ---

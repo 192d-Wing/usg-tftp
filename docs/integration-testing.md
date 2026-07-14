@@ -1,6 +1,6 @@
 # TFTP Server Integration Testing
 
-This document describes integration testing procedures for the Snow-Owl TFTP server, with a focus on RFC compliance validation and interoperability with standard TFTP clients.
+This document describes integration testing procedures for the USG-TFTP TFTP server, with a focus on RFC compliance validation and interoperability with standard TFTP clients.
 
 ## Overview
 
@@ -74,10 +74,10 @@ printf "Unix\nLine\nEndings\n" > /tmp/tftp-test/root/unix-lines.txt
 
 ```bash
 # Build and run the server
-cargo build --release --manifest-path /path/to/Snow-Owl/Cargo.toml
+cargo build --release --manifest-path /path/to/USG-TFTP/Cargo.toml
 
 # Run server (in separate terminal)
-/path/to/Snow-Owl/target/release/usg-tftp --config /tmp/tftp-test/tftp.toml
+/path/to/USG-TFTP/target/release/usg-tftp --config /tmp/tftp-test/tftp.toml
 ```
 
 ## RFC Compliance Tests
@@ -107,6 +107,7 @@ rm hello.txt
 **Expected Result**: File successfully downloaded with correct content
 
 **Audit Log Check**:
+
 ```bash
 # Should see: read_request, transfer_started, transfer_completed
 grep -E "(read_request|transfer_completed)" /tmp/tftp-test/tftp.log
@@ -142,11 +143,13 @@ rm unix-lines.txt
 ```
 
 **Expected Result**:
+
 - Transfer completes successfully
 - Server logs show correct transfer size including CR+LF conversion overhead
 - Audit log `bytes_transferred` matches actual bytes sent over network
 
 **Audit Log Check**:
+
 ```bash
 # Look for transfer_completed event with accurate bytes_transferred
 grep "transfer_completed" /tmp/tftp-test/tftp.log | grep "unix-lines.txt"
@@ -175,11 +178,13 @@ rm large-*.bin
 ```
 
 **Expected Result**:
+
 - 1024-byte blocks: Transfer uses negotiated block size
 - 4-byte blocks (invalid): Server logs warning, uses default 512
 - Both transfers complete successfully with correct data
 
 **Server Log Check**:
+
 ```bash
 # Should see warning about invalid blksize=4
 grep "invalid blksize" /tmp/tftp-test/tftp.log
@@ -205,11 +210,13 @@ rm random-tsize.bin
 ```
 
 **Expected Result**:
+
 - Client sends `tsize=0` in RRQ
 - Server responds with actual file size in OACK
 - Transfer completes successfully
 
 **Packet Capture** (optional):
+
 ```bash
 # Capture TFTP traffic
 sudo tcpdump -i lo -n port 6969 -w /tmp/tftp-capture.pcap
@@ -240,10 +247,12 @@ EOF
 ```
 
 **Expected Result**:
+
 - Server logs timeout errors
 - ERROR packets sent to client (visible in audit logs)
 
 **Audit Log Check**:
+
 ```bash
 # Should see timeout error or transfer_failed
 grep -E "(timeout|transfer_failed)" /tmp/tftp-test/tftp.log
@@ -258,6 +267,7 @@ grep -E "(timeout|transfer_failed)" /tmp/tftp-test/tftp.log
 **Note**: This requires packet manipulation tools like `tc` (traffic control) or a custom test client. For manual testing, this behavior is validated through code review and unit tests.
 
 **Automated Test** (requires custom test client):
+
 ```python
 #!/usr/bin/env python3
 # test_duplicate_ack.py - Send duplicate ACKs to test retransmission
@@ -303,6 +313,7 @@ sock.close()
 ```
 
 **Expected Result**:
+
 - Server detects duplicate ACK
 - Logs: "Duplicate ACK detected, retransmitting block X"
 - Retransmits current DATA packet
@@ -328,11 +339,13 @@ rm hello-badtimeout.bin
 ```
 
 **Expected Result**:
+
 - Server logs warning: "invalid timeout=999 (valid: 1-255)"
 - Server omits invalid option from OACK
 - Transfer completes with default timeout value
 
 **Server Log Check**:
+
 ```bash
 grep "invalid timeout" /tmp/tftp-test/tftp.log
 grep "non-numeric" /tmp/tftp-test/tftp.log
@@ -371,6 +384,7 @@ rm /tmp/tftp-test/root/upload.txt
 **Expected Result**: File uploaded successfully with correct content
 
 **Audit Log Check**:
+
 ```bash
 grep -E "(write_request|write_completed)" /tmp/tftp-test/tftp.log
 ```
@@ -418,6 +432,7 @@ rm /tmp/tftp-test/root/uploads/file.txt
 ```
 
 **Expected Result**:
+
 - allowed.txt: Upload succeeds
 - blocked.exe: Server returns ERROR, logs "file not in allowed_patterns"
 - uploads/file.txt: Upload succeeds
@@ -448,6 +463,7 @@ rm test-1k.bin /tmp/tftp-test/root/test-1k.bin
 ```
 
 **Expected Result**:
+
 - Transfer completes successfully
 - If size matches: No warnings
 - If size mismatches: Warning logged, file still written
@@ -481,6 +497,7 @@ rm large-10m.bin /tmp/tftp-test/root/large-10m.bin
 ```
 
 **Expected Result**:
+
 - Transfer completes in reasonable time
 - Audit log shows throughput_bps metric
 - No packet loss or retransmissions
@@ -518,6 +535,7 @@ rm random-*.bin
 ```
 
 **Expected Result**:
+
 - All 5 transfers complete successfully
 - All files have matching checksums
 - No server errors or crashes
@@ -551,10 +569,12 @@ EOF
 ```
 
 **Expected Result**:
+
 - Both attempts rejected with "Access violation"
 - Audit log shows "path_traversal_attempt"
 
 **Audit Log Check**:
+
 ```bash
 grep "path_traversal_attempt" /tmp/tftp-test/tftp.log
 ```
@@ -586,6 +606,7 @@ rm disabled-write.txt
 ```
 
 **Expected Result**:
+
 - Write request denied
 - Audit log: "write_request_denied" with reason "writes disabled"
 
@@ -685,7 +706,7 @@ TEST_DIR="/tmp/tftp-test"
 SERVER_PORT="6969"
 RESULTS_FILE="$TEST_DIR/test-results.txt"
 
-echo "Snow-Owl TFTP Integration Tests" > "$RESULTS_FILE"
+echo "USG-TFTP TFTP Integration Tests" > "$RESULTS_FILE"
 echo "===============================" >> "$RESULTS_FILE"
 echo "" >> "$RESULTS_FILE"
 
@@ -750,6 +771,7 @@ fi
 ```
 
 Make the script executable:
+
 ```bash
 chmod +x integration-test.sh
 ```

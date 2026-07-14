@@ -47,7 +47,7 @@ pub struct TftpConfig {
 impl Default for TftpConfig {
     fn default() -> Self {
         Self {
-            root_dir: PathBuf::from("/var/lib/snow-owl/tftp"),
+            root_dir: PathBuf::from("/var/lib/usg-tftp/tftp"),
             bind_addr: SocketAddr::new(Ipv6Addr::UNSPECIFIED.into(), 69),
             multicast: MulticastConfig::default(),
             logging: LoggingConfig::default(),
@@ -74,7 +74,7 @@ impl Default for LoggingConfig {
         Self {
             level: "info".to_string(),
             format: LogFormat::Json,
-            file: Some(PathBuf::from("/var/log/snow-owl/tftp-audit.json")),
+            file: Some(PathBuf::from("/var/log/usg-tftp/tftp-audit.json")),
             audit_enabled: true,
         }
     }

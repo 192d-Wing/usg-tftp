@@ -1,17 +1,20 @@
 # TFTP Windowsize Tests (RFC 7440)
 
-This directory contains comprehensive tests for RFC 7440 windowsize option support in the Snow-Owl TFTP implementation.
+This directory contains comprehensive tests for RFC 7440 windowsize option support in the USG-TFTP TFTP implementation.
 
 ## Test Files
 
 ### 1. `windowsize-test.sh`
+
 Bash-based test suite covering all 32 windowsize test cases.
 
 **Requirements:**
+
 - `atftp` client (supports windowsize option)
 - `md5sum` or `md5` (for file integrity verification)
 
 **Installation:**
+
 ```bash
 # Ubuntu/Debian
 sudo apt-get install atftp
@@ -21,6 +24,7 @@ brew install atftp
 ```
 
 **Usage:**
+
 ```bash
 # Run all 32 tests
 cd crates/usg-tftp
@@ -29,6 +33,7 @@ cargo build --release
 ```
 
 **Test Coverage:**
+
 - Tests 1-8: Small file (1 KB) with windowsize 1-8
 - Tests 9-16: Medium file (10 KB) with windowsize 1, 2, 4, 8, 12, 16, 24, 32
 - Tests 17-24: Large file (100 KB) with windowsize 1, 2, 4, 8, 16, 32, 48, 64
@@ -37,13 +42,16 @@ cargo build --release
 - Tests 31-32: Exact window boundary edge cases
 
 ### 2. `windowsize-analyzer.py`
+
 Python-based advanced testing tool with detailed performance metrics.
 
 **Requirements:**
+
 - Python 3.6+
 - No external dependencies (uses standard library)
 
 **Usage:**
+
 ```bash
 # Quick test (windowsize 1-8 with medium file)
 ./tests/windowsize-analyzer.py quick
@@ -56,6 +64,7 @@ Python-based advanced testing tool with detailed performance metrics.
 ```
 
 **Metrics Collected:**
+
 - File size transferred
 - Transfer time
 - Throughput (Mbps)
@@ -66,6 +75,7 @@ Python-based advanced testing tool with detailed performance metrics.
 - Average RTT
 
 **Example Output:**
+
 ```
 ====================================================================================================
 WS   File Size    Time (s)   Throughput   Packets  ACKs     Retrans  Loss %
@@ -85,9 +95,11 @@ Performance Summary:
 ## RFC 7440 Windowsize Option
 
 ### Overview
+
 RFC 7440 defines the "windowsize" option for TFTP, which allows multiple DATA packets to be sent before requiring an ACK, significantly improving performance on high-latency networks.
 
 ### Specification
+
 - **Option Name:** `windowsize`
 - **Option Value:** Number of blocks (1-65535)
 - **Default:** 1 (traditional TFTP stop-and-wait)
@@ -96,6 +108,7 @@ RFC 7440 defines the "windowsize" option for TFTP, which allows multiple DATA pa
 ### Protocol Flow
 
 **Traditional TFTP (windowsize=1):**
+
 ```
 Client -> Server: RRQ
 Server -> Client: DATA (block 1)
@@ -106,6 +119,7 @@ Client -> Server: ACK (block 2)
 ```
 
 **With Windowsize=4:**
+
 ```
 Client -> Server: RRQ (windowsize=4)
 Server -> Client: OACK (windowsize=4)
@@ -158,6 +172,7 @@ Server -> Client: DATA (block 5)
 ### Performance Characteristics
 
 **Throughput vs Windowsize (expected trend):**
+
 - WS=1: Baseline (limited by RTT)
 - WS=2: ~2x improvement
 - WS=4: ~3-4x improvement
@@ -167,6 +182,7 @@ Server -> Client: DATA (block 5)
 - WS=64: ~12-18x improvement (diminishing returns)
 
 **Optimal Windowsize:**
+
 ```
 optimal_windowsize = (bandwidth × RTT) / (blocksize × 8)
 ```
@@ -174,7 +190,9 @@ optimal_windowsize = (bandwidth × RTT) / (blocksize × 8)
 For localhost testing (RTT ≈ 0.1ms), performance gains plateau around windowsize=16-32.
 
 ### File Integrity
+
 All tests verify MD5 checksums to ensure:
+
 - No data corruption
 - Correct block ordering
 - Complete file transfer
@@ -182,7 +200,8 @@ All tests verify MD5 checksums to ensure:
 
 ## Implementation Requirements
 
-The Snow-Owl TFTP server must:
+The USG-TFTP TFTP server must:
+
 1. Accept windowsize option in RRQ
 2. Respond with OACK if windowsize is supported
 3. Send multiple DATA packets per window
@@ -194,6 +213,7 @@ The Snow-Owl TFTP server must:
 ## Running the Tests
 
 ### Quick Test
+
 ```bash
 # Build the server
 cargo build --release
@@ -206,6 +226,7 @@ cargo build --release
 ```
 
 ### Full Test Suite
+
 ```bash
 # Run all 32 tests
 ./tests/windowsize-test.sh
@@ -215,6 +236,7 @@ cargo build --release
 ```
 
 ### Performance Analysis
+
 ```bash
 # Run performance comparison
 ./tests/windowsize-analyzer.py performance
@@ -223,24 +245,28 @@ cargo build --release
 ## Troubleshooting
 
 ### atftp not found
+
 ```bash
 sudo apt-get install atftp  # Ubuntu/Debian
 brew install atftp          # macOS
 ```
 
 ### Connection refused
+
 - Ensure server is built: `cargo build --release`
 - Check server is running
 - Verify port 6970 is not in use
 - Check firewall settings
 
 ### Test failures
+
 - Check server logs: `/tmp/tftp-windowsize-test-*/logs/tftp.log`
 - Verify test files were created
 - Ensure sufficient disk space
 - Check MD5 utility is available
 
 ### Timeout errors
+
 - Increase timeout in test scripts
 - Check network latency
 - Verify server performance
@@ -255,4 +281,4 @@ brew install atftp          # macOS
 
 ## License
 
-Part of the Snow-Owl project. See main LICENSE file.
+Part of the USG-TFTP project. See main LICENSE file.

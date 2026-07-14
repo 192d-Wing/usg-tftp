@@ -1,8 +1,8 @@
-# IPv6 Support in Snow-Owl TFTP Server
+# IPv6 Support in USG-TFTP TFTP Server
 
 ## Overview
 
-The Snow-Owl TFTP server provides full IPv6 network support in compliance with **Rule 2: IPv6 Network Support** from the SFTP crate's development rules.
+The USG-TFTP TFTP server provides full IPv6 network support in compliance with **Rule 2: IPv6 Network Support** from the SFTP crate's development rules.
 
 **Current Status:** ✅ Full IPv6 support - both binding and file transfers work
 
@@ -44,31 +44,31 @@ The Snow-Owl TFTP server provides full IPv6 network support in compliance with *
 ### IPv6 Loopback (Testing)
 
 ```toml
-root_dir = "/var/lib/snow-owl/tftp"
+root_dir = "/var/lib/usg-tftp/tftp"
 bind_addr = "[::1]:69"
 
 [logging]
-file = "/var/log/snow-owl/tftp-audit.json"
+file = "/var/log/usg-tftp/tftp-audit.json"
 ```
 
 ### Dual-Stack (IPv6 with IPv4 fallback) - Recommended
 
 ```toml
-root_dir = "/var/lib/snow-owl/tftp"
+root_dir = "/var/lib/usg-tftp/tftp"
 bind_addr = "[::]:69"  # Listens on all interfaces, both IPv4 and IPv6
 
 [logging]
-file = "/var/log/snow-owl/tftp-audit.json"
+file = "/var/log/usg-tftp/tftp-audit.json"
 ```
 
 ### IPv4 Only
 
 ```toml
-root_dir = "/var/lib/snow-owl/tftp"
+root_dir = "/var/lib/usg-tftp/tftp"
 bind_addr = "0.0.0.0:69"  # IPv4 all interfaces
 
 [logging]
-file = "/var/log/snow-owl/tftp-audit.json"
+file = "/var/log/usg-tftp/tftp-audit.json"
 ```
 
 ## Testing IPv6 Support
@@ -115,6 +115,7 @@ kill $SERVER_PID
 ```
 
 **Expected Result:**
+
 - Server starts and binds to IPv6 address ✅
 - Client connection accepted ✅
 - File transfer completes successfully ✅
@@ -125,6 +126,7 @@ kill $SERVER_PID
 ### Socket Creation Flow
 
 1. **Main Server Socket** ([src/bin/server.rs:247](../src/bin/server.rs#L247))
+
    ```rust
    fn create_optimized_socket(bind_addr: SocketAddr, config: &SocketConfig) -> Result<UdpSocket> {
        let domain = if bind_addr.is_ipv4() {
@@ -137,6 +139,7 @@ kill $SERVER_PID
    ```
 
 2. **Per-Transfer Socket** ([src/bin/server.rs:338](../src/bin/server.rs#L338))
+
    ```rust
    /// Creates a per-transfer socket with the correct address family for IPv4/IPv6 support
    fn create_transfer_socket(bind_addr: SocketAddr) -> Result<UdpSocket> {
@@ -157,6 +160,7 @@ kill $SERVER_PID
    ```
 
 3. **Address Family Selection** (per-transfer handlers)
+
    ```rust
    // Use IPv6 unspecified if client is IPv6, IPv4 otherwise (dual-stack support)
    let bind_addr = if client_addr.is_ipv6() {

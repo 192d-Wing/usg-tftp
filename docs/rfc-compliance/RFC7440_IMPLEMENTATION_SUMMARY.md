@@ -7,7 +7,8 @@
 
 ## Executive Summary
 
-RFC 7440 Windowsize support is **already fully implemented** in the Snow-Owl TFTP server codebase. The implementation includes:
+RFC 7440 Windowsize support is **already fully implemented** in the USG-TFTP TFTP server codebase. The implementation includes:
+
 - ✅ Option negotiation (RRQ/WRQ)
 - ✅ OACK response generation
 - ✅ Windowed DATA transmission (buffered mode)
@@ -48,11 +49,13 @@ async fn handle_client(
 **Files**: [src/main.rs:896-899](../src/main.rs#L896-L899) and [src/main.rs:1189-1192](../src/main.rs#L1189-L1192)
 
 Changed from:
+
 ```rust
 let mut options = TftpOptions::default();
 ```
 
 To:
+
 ```rust
 let mut options = TftpOptions {
     windowsize: default_windowsize,
@@ -65,15 +68,18 @@ let mut options = TftpOptions {
 #### 3. Updated Call Sites (Batch and Non-Batch Paths)
 
 **Files**:
+
 - [src/main.rs:735](../src/main.rs#L735) - Batch receive path
 - [src/main.rs:795](../src/main.rs#L795) - Single receive path
 
 Added:
+
 ```rust
 let default_windowsize = self.config.performance.default_windowsize;
 ```
 
 And passed it to `handle_client()`:
+
 ```rust
 Self::handle_client(
     // ... other params
@@ -211,6 +217,7 @@ Similar logic but reads blocks incrementally from file to minimize memory usage.
 **Code**: [src/main.rs:2097-2106](../src/main.rs#L2097-L2106)
 
 The server only sends ACKs for:
+
 1. The last block in each window
 2. The final block (size < block_size)
 
@@ -266,6 +273,7 @@ time tftp -m binary -c get largefile.bin server_ip
 ```
 
 **Expected results**:
+
 - 10ms RTT: 5-10x improvement
 - 50ms RTT: 10-20x improvement
 - 100ms RTT: 15-25x improvement
@@ -273,6 +281,7 @@ time tftp -m binary -c get largefile.bin server_ip
 #### 3. Client Compatibility Testing
 
 Test with various TFTP clients:
+
 - ✅ Clients that support RFC 7440 → Use windowing
 - ✅ Clients that don't support RFC 7440 → Fall back to windowsize=1 (compatible)
 
@@ -420,6 +429,7 @@ sudo bpftrace tests/syscall-counter.bt
 ### Memory Considerations
 
 Each window requires buffering multiple packets:
+
 - windowsize=16, block_size=8KB → 128KB per transfer
 - Streaming mode minimizes memory for large files
 - Buffer pool reuses packet buffers across transfers
@@ -437,11 +447,13 @@ RFC 7440 Windowsize support is **production-ready** after today's code changes. 
 5. ✅ Now correctly uses configured `default_windowsize`
 
 **Expected Performance Impact**:
+
 - Localhost: 5-10% improvement
 - LAN (10ms RTT): 5-10x improvement
 - WAN (50ms+ RTT): 10-20x improvement
 
 **Combined with batch operations** (recvmmsg/sendmmsg):
+
 - Total expected improvement: **12-20x on high-latency networks**
 
 **Next Step**: Run benchmarks to validate performance gains.

@@ -47,7 +47,7 @@ trap cleanup EXIT
 # Print header
 print_header() {
     echo -e "${BLUE}================================================${NC}"
-    echo -e "${BLUE}  Snow-Owl TFTP Windowsize Tests (RFC 7440)${NC}"
+    echo -e "${BLUE}  USG-TFTP TFTP Windowsize Tests (RFC 7440)${NC}"
     echo -e "${BLUE}================================================${NC}"
     echo ""
 }
@@ -306,7 +306,7 @@ main() {
     setup_test_env
 
     # Initialize results file
-    echo "Snow-Owl TFTP Windowsize Test Results (RFC 7440)" > "$RESULTS_FILE"
+    echo "USG-TFTP TFTP Windowsize Test Results (RFC 7440)" > "$RESULTS_FILE"
     echo "================================================" >> "$RESULTS_FILE"
     echo "Date: $(date)" >> "$RESULTS_FILE"
     echo "" >> "$RESULTS_FILE"

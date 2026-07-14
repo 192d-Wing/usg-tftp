@@ -28,29 +28,35 @@ Comprehensive performance optimizations implemented to improve TFTP server throu
 #### `src/main.rs`
 
 **Constants:**
+
 - Changed `DEFAULT_BLOCK_SIZE` from 512 to 8192 bytes (Line 34)
   - Provides 16x throughput improvement
   - 93% reduction in packet count
 
 **Imports:**
+
 - Added `mod buffer_pool` and `use buffer_pool::BufferPool`
 
 **TftpServer struct:**
+
 - Added `buffer_pool: BufferPool` field
 - Initialize buffer pool in constructor
 
 **Function: `run()` (Lines 293-348)**
+
 - Replaced fixed buffer with buffer pool acquisition
 - Eliminated UDP packet copying
 - Buffer automatically returned to pool
 
 **Function: `convert_to_netascii()` (Lines 168-264)**
+
 - Replaced byte-by-byte processing with chunked approach
 - Process in 4KB chunks for better cache utilization
 - Bulk copy data without line endings
 - Pre-allocate with better size estimation
 
 **Function: `handle_read_request()` (Lines 872-1186)**
+
 - Completely rewritten for streaming support
 - Split into buffered and streaming paths
 - Small files (<1MB) use buffering for NETASCII
@@ -60,20 +66,24 @@ Comprehensive performance optimizations implemented to improve TFTP server throu
   - `send_file_data_streaming()` - for large files with chunked reading
 
 **Function: `handle_write_request()` (Lines 1177-1186)**
+
 - Pre-allocate receive buffer based on `transfer_size` option
 - Default 1MB pre-allocation if size unknown
 - Eliminates repeated Vec reallocations
 
 **Function: `wait_for_ack_with_duplicate_handling()` (Line 1554)**
+
 - Reduced ACK buffer from 1024 bytes to 16 bytes
 - ACK packets are only 4 bytes
 
 **Function: `wait_for_ack()` (Line 1619)**
+
 - Reduced ACK buffer from 1024 bytes to 16 bytes
 
 #### `src/config.rs`
 
 **New struct: `PerformanceConfig` (Lines 562-595)**
+
 ```rust
 pub struct PerformanceConfig {
     pub default_block_size: usize,        // Default: 8192
@@ -84,12 +94,14 @@ pub struct PerformanceConfig {
 ```
 
 **Modified struct: `TftpConfig`**
+
 - Added `performance: PerformanceConfig` field
 - Updated Default implementation
 
 #### `README.md`
 
 Updated Features section to highlight performance improvements:
+
 - 16x throughput improvement
 - 98% reduction in memory allocations
 - 99% reduction in peak memory usage
@@ -98,26 +110,31 @@ Updated Features section to highlight performance improvements:
 ## Performance Impact
 
 ### Memory Usage
+
 - **Before**: O(file_size) - 100MB file = 120MB RAM
 - **After**: O(1) - Constant ~2MB regardless of file size
 - **Improvement**: 98-99% reduction for large files
 
 ### Allocations (100MB transfer)
+
 - **Before**: ~585,940 allocations
 - **After**: ~24,438 allocations
 - **Improvement**: 95.8% reduction
 
 ### Network Efficiency
+
 - **Before**: 390,626 packets (512B blocks)
 - **After**: 24,414 packets (8KB blocks)
 - **Improvement**: 93.7% reduction
 
 ### Throughput
+
 - **Before**: ~8 MB/s on Gigabit Ethernet
 - **After**: ~40 MB/s on Gigabit Ethernet
 - **Improvement**: 5x faster
 
 ### Transfer Time (100MB file)
+
 - **Before**: 12 seconds
 - **After**: 2.5 seconds
 - **Improvement**: 4.8x faster
@@ -125,6 +142,7 @@ Updated Features section to highlight performance improvements:
 ## Compatibility
 
 All optimizations maintain:
+
 - ✅ **RFC 1350 Compliance**: Full TFTP protocol support
 - ✅ **RFC 2348 Compliance**: Block size negotiation
 - ✅ **Backwards Compatibility**: Clients can request 512B blocks
@@ -174,6 +192,7 @@ watch -n 1 'ps aux | grep usg-tftp | grep -v grep'
 No breaking changes. All optimizations are transparent to clients.
 
 Default behavior changes:
+
 - Block size increased from 512B to 8KB (clients can override)
 - Memory usage is now constant instead of proportional to file size
 - Large files now stream instead of buffering
@@ -189,6 +208,7 @@ streaming_threshold = 0  # Never stream, always buffer
 ## Future Work
 
 Potential additional optimizations:
+
 1. SIMD for NETASCII conversion
 2. Zero-copy sendfile() on Linux
 3. UDP batching with recvmmsg()
@@ -197,7 +217,7 @@ Potential additional optimizations:
 
 ## Contributors
 
-Performance optimizations implemented by the Snow-Owl team.
+Performance optimizations implemented by the USG-TFTP team.
 
 ## References
 

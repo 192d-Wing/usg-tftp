@@ -1,10 +1,10 @@
 # TFTP Write Operations
 
-This document describes how to configure and use write operations in the Snow-Owl TFTP server.
+This document describes how to configure and use write operations in the USG-TFTP TFTP server.
 
 ## Overview
 
-The Snow-Owl TFTP server supports RFC 1350 Write Request (WRQ) operations with additional security controls:
+The USG-TFTP TFTP server supports RFC 1350 Write Request (WRQ) operations with additional security controls:
 
 - **Disabled by default** - Write operations must be explicitly enabled
 - **Pattern-based access control** - Only files matching allowed patterns can be written

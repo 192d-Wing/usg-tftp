@@ -1,12 +1,12 @@
 # NIST 800-53 and STIG Compliance Mapping
 
-## Snow-Owl TFTP Server Security Controls
+## USG-TFTP TFTP Server Security Controls
 
-This document maps the security controls implemented in the Snow-Owl TFTP server to NIST 800-53 Rev 5 controls and DoD Application Security and Development STIG requirements.
+This document maps the security controls implemented in the USG-TFTP TFTP server to NIST 800-53 Rev 5 controls and DoD Application Security and Development STIG requirements.
 
 ## Executive Summary
 
-The Snow-Owl TFTP server implements comprehensive security controls addressing:
+The USG-TFTP TFTP server implements comprehensive security controls addressing:
 
 - **Access Control (AC)**: Path validation, directory restrictions, least privilege
 - **Audit and Accountability (AU)**: Comprehensive logging of security events
@@ -175,7 +175,7 @@ Configuration example:
 ```toml
 [logging]
 format = "json"  # Enable JSON structured logging
-file = "/var/log/snow-owl/tftp-audit.json"
+file = "/var/log/usg-tftp/tftp-audit.json"
 audit_enabled = true
 level = "info"
 ```
@@ -678,7 +678,7 @@ const MAX_RETRIES: u32 = 5;
 ```toml
 max_file_size_bytes = 104857600  # 100 MB
 bind_addr = "[::]:69"            # Standard TFTP port
-root_dir = "/var/lib/snow-owl/tftp"  # Dedicated directory
+root_dir = "/var/lib/usg-tftp/tftp"  # Dedicated directory
 ```
 
 ### Required Security Configuration
@@ -707,7 +707,7 @@ tftp localhost -c get "../../../etc/passwd"
 tftp localhost -c get "..\\..\\..\\windows\\system32\\config\\sam"
 
 # Test symlink rejection
-ln -s /etc/passwd /var/lib/snow-owl/tftp/link
+ln -s /etc/passwd /var/lib/usg-tftp/tftp/link
 tftp localhost -c get "link"  # Should be rejected
 ```
 
@@ -715,7 +715,7 @@ tftp localhost -c get "link"  # Should be rejected
 
 ```bash
 # Test file size limit
-dd if=/dev/zero of=/var/lib/snow-owl/tftp/large.bin bs=1M count=101
+dd if=/dev/zero of=/var/lib/usg-tftp/tftp/large.bin bs=1M count=101
 tftp localhost -c get "large.bin"  # Should reject >100MB
 
 # Test concurrent connections

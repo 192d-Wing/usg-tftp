@@ -1,20 +1,20 @@
-# Elastic Stack Integration for Snow-Owl TFTP
+# Elastic Stack Integration for USG-TFTP TFTP
 
-Complete guide for integrating Snow-Owl TFTP audit logs with Elastic Stack (Elasticsearch, Logstash, Kibana).
+Complete guide for integrating USG-TFTP TFTP audit logs with Elastic Stack (Elasticsearch, Logstash, Kibana).
 
 ## Prerequisites
 
 - Elasticsearch 8.x
 - Logstash 8.x
 - Kibana 8.x
-- Snow-Owl TFTP server with audit logging enabled
+- USG-TFTP TFTP server with audit logging enabled
 
 ## Architecture
 
 ```
-Snow-Owl TFTP → JSON Logs → Filebeat → Logstash → Elasticsearch → Kibana
+USG-TFTP TFTP → JSON Logs → Filebeat → Logstash → Elasticsearch → Kibana
                      ↓
-         /var/log/snow-owl/tftp-audit.json
+         /var/log/usg-tftp/tftp-audit.json
 ```
 
 ## Step 1: Install Elastic Stack
@@ -71,7 +71,7 @@ filebeat.inputs:
 - type: log
   enabled: true
   paths:
-    - /var/log/snow-owl/tftp-audit.json
+    - /var/log/usg-tftp/tftp-audit.json
 
   # Parse JSON logs
   json.keys_under_root: true
@@ -476,6 +476,7 @@ event_type:transfer_completed AND duration_ms > 5000
 ```
 event_type:read_request
 ```
+
 Group by: `client_ip`
 
 ### Write Attempt Detection
@@ -540,8 +541,8 @@ curl -XGET 'localhost:9200/tftp-audit-*/_search?pretty' -H 'Content-Type: applic
 ### No data appearing in Kibana
 
 1. Check Filebeat is running: `systemctl status filebeat`
-2. Check log file exists: `ls -l /var/log/snow-owl/tftp-audit.json`
-3. Check Filebeat can read logs: `sudo -u filebeat cat /var/log/snow-owl/tftp-audit.json`
+2. Check log file exists: `ls -l /var/log/usg-tftp/tftp-audit.json`
+3. Check Filebeat can read logs: `sudo -u filebeat cat /var/log/usg-tftp/tftp-audit.json`
 4. Check Logstash is receiving: `tail -f /var/log/logstash/logstash-plain.log`
 5. Check Elasticsearch index exists: `curl localhost:9200/_cat/indices?v`
 
@@ -558,12 +559,14 @@ grep ERROR /var/log/logstash/logstash-plain.log
 ### Performance issues
 
 1. Increase Logstash heap size in `/etc/logstash/jvm.options`:
+
    ```
    -Xms1g
    -Xmx1g
    ```
 
 2. Adjust Elasticsearch settings:
+
    ```bash
    # Increase refresh interval
    curl -XPUT 'localhost:9200/tftp-audit-*/_settings' -H 'Content-Type: application/json' -d'

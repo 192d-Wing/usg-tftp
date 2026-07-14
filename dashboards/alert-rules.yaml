@@ -1,8 +1,8 @@
-# Alert Rules for Snow-Owl TFTP Server
+# Alert Rules for USG-TFTP TFTP Server
 # Compatible with Prometheus AlertManager, Grafana Alerts, and similar systems
 #
 # These rules define common security and operational alerting scenarios
-# for the Snow-Owl TFTP server based on audit log events.
+# for the USG-TFTP TFTP server based on audit log events.
 
 groups:
   # ============================================================================

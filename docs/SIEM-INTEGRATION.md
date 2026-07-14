@@ -1,8 +1,8 @@
-# SIEM Integration Guide for Snow-Owl TFTP Server
+# SIEM Integration Guide for USG-TFTP TFTP Server
 
 ## Overview
 
-The Snow-Owl TFTP server provides comprehensive structured audit logging designed for Security Information and Event Management (SIEM) integration. All security-relevant events are logged in JSON format for easy parsing and analysis.
+The USG-TFTP TFTP server provides comprehensive structured audit logging designed for Security Information and Event Management (SIEM) integration. All security-relevant events are logged in JSON format for easy parsing and analysis.
 
 ## Default Configuration
 
@@ -11,7 +11,7 @@ The Snow-Owl TFTP server provides comprehensive structured audit logging designe
 ```toml
 [logging]
 format = "json"  # Structured JSON logs for SIEM parsing
-file = "/var/log/snow-owl/tftp-audit.json"  # Local log file
+file = "/var/log/usg-tftp/tftp-audit.json"  # Local log file
 audit_enabled = true  # Enable comprehensive audit events
 level = "info"  # Log info, warn, and error events
 ```
@@ -21,20 +21,20 @@ level = "info"  # Log info, warn, and error events
 ### 1. Create Log Directory
 
 ```bash
-sudo mkdir -p /var/log/snow-owl
-sudo chown snow-owl:snow-owl /var/log/snow-owl
-sudo chmod 750 /var/log/snow-owl
+sudo mkdir -p /var/log/usg-tftp
+sudo chown usg-tftp:usg-tftp /var/log/usg-tftp
+sudo chmod 750 /var/log/usg-tftp
 ```
 
 ### 2. Initialize Configuration
 
 ```bash
-usg-tftp --init-config --config /etc/snow-owl/tftp.toml
+usg-tftp --init-config --config /etc/usg-tftp/tftp.toml
 ```
 
 ### 3. Start Server
 
-The server will automatically log all audit events to `/var/log/snow-owl/tftp-audit.json`.
+The server will automatically log all audit events to `/var/log/usg-tftp/tftp-audit.json`.
 
 ## Audit Event Types
 
@@ -50,7 +50,7 @@ The server will automatically log all audit events to `/var/log/snow-owl/tftp-au
   "service": "usg-tftp",
   "severity": "info",
   "bind_addr": "0.0.0.0:69",
-  "root_dir": "/var/lib/snow-owl/tftp",
+  "root_dir": "/var/lib/usg-tftp/tftp",
   "multicast_enabled": false
 }
 ```
@@ -170,7 +170,7 @@ filebeat.inputs:
 - type: log
   enabled: true
   paths:
-    - /var/log/snow-owl/tftp-audit.json
+    - /var/log/usg-tftp/tftp-audit.json
   json.keys_under_root: true
   json.add_error_key: true
   fields:
@@ -245,7 +245,7 @@ Create `/etc/logstash/conf.d/usg-tftp.conf`:
 ```ruby
 input {
   file {
-    path => "/var/log/snow-owl/tftp-audit.json"
+    path => "/var/log/usg-tftp/tftp-audit.json"
     codec => "json"
     type => "tftp-audit"
   }
@@ -288,7 +288,7 @@ Import this visualization:
 {
   "title": "TFTP Security Dashboard",
   "hits": 0,
-  "description": "Security monitoring for Snow-Owl TFTP",
+  "description": "Security monitoring for USG-TFTP TFTP",
   "panelsJSON": "[{\"type\":\"visualization\",\"title\":\"Events by Type\"}]",
   "optionsJSON": "{\"darkTheme\":false}",
   "version": 1
@@ -304,7 +304,7 @@ Edit `/etc/datadog-agent/conf.d/tftp.d/conf.yaml`:
 ```yaml
 logs:
   - type: file
-    path: /var/log/snow-owl/tftp-audit.json
+    path: /var/log/usg-tftp/tftp-audit.json
     service: usg-tftp
     source: tftp
     sourcecategory: security
@@ -367,7 +367,7 @@ Edit `/opt/aws/amazon-cloudwatch-agent/etc/config.json`:
       "files": {
         "collect_list": [
           {
-            "file_path": "/var/log/snow-owl/tftp-audit.json",
+            "file_path": "/var/log/usg-tftp/tftp-audit.json",
             "log_group_name": "/aws/tftp/audit",
             "log_stream_name": "{instance_id}",
             "timezone": "UTC"
@@ -408,7 +408,7 @@ Create `/etc/fluent/fluent.conf`:
 ```ruby
 <source>
   @type tail
-  path /var/log/snow-owl/tftp-audit.json
+  path /var/log/usg-tftp/tftp-audit.json
   pos_file /var/log/fluent/tftp-audit.pos
   tag tftp.audit
 
@@ -449,14 +449,14 @@ Create `/etc/fluent/fluent.conf`:
 Create `/etc/logrotate.d/usg-tftp`:
 
 ```text
-/var/log/snow-owl/tftp-audit.json {
+/var/log/usg-tftp/tftp-audit.json {
     daily
     rotate 90
     compress
     delaycompress
     notifempty
     missingok
-    create 0640 snow-owl snow-owl
+    create 0640 usg-tftp usg-tftp
     postrotate
         systemctl reload usg-tftp
     endscript
@@ -536,7 +536,7 @@ For high-traffic environments, configure larger buffers:
 ```toml
 [logging]
 format = "json"
-file = "/var/log/snow-owl/tftp-audit.json"
+file = "/var/log/usg-tftp/tftp-audit.json"
 audit_enabled = true
 level = "info"
 ```
@@ -559,13 +559,13 @@ The audit logs satisfy these compliance requirements:
 1. Check audit is enabled:
 
 ```bash
-grep audit_enabled /etc/snow-owl/tftp.toml
+grep audit_enabled /etc/usg-tftp/tftp.toml
 ```
 
 1. Verify log directory permissions:
 
 ```bash
-ls -ld /var/log/snow-owl
+ls -ld /var/log/usg-tftp
 ```
 
 1. Check server logs:
@@ -579,8 +579,8 @@ journalctl -u usg-tftp -n 50
 Ensure parent directory exists:
 
 ```bash
-sudo mkdir -p /var/log/snow-owl
-sudo chown snow-owl:snow-owl /var/log/snow-owl
+sudo mkdir -p /var/log/usg-tftp
+sudo chown usg-tftp:usg-tftp /var/log/usg-tftp
 ```
 
 ### Logs Not Forwarding to SIEM
@@ -594,7 +594,7 @@ systemctl status filebeat  # or your log shipper
 1. Verify log file is readable:
 
 ```bash
-sudo -u filebeat cat /var/log/snow-owl/tftp-audit.json
+sudo -u filebeat cat /var/log/usg-tftp/tftp-audit.json
 ```
 
 1. Check network connectivity to SIEM:

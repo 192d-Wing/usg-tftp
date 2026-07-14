@@ -1,4 +1,4 @@
-// Snow-Owl TFTP Server Binary
+// USG-TFTP TFTP Server Binary
 #![allow(dead_code)]
 
 use usg_tftp::audit::AuditLogger;
@@ -377,7 +377,7 @@ fn create_transfer_socket(bind_addr: SocketAddr) -> Result<UdpSocket> {
 #[command(name = "usg-tftp", about = "Standalone TFTP server")]
 struct Cli {
     /// Path to the TOML configuration file
-    #[arg(long, default_value = "/etc/snow-owl/tftp.toml")]
+    #[arg(long, default_value = "/etc/usg-tftp/tftp.toml")]
     config: PathBuf,
 
     /// Write a default TOML configuration file and exit

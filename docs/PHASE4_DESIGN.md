@@ -8,7 +8,7 @@
 
 ## 📋 Executive Summary
 
-Phase 4 introduces a **master-worker thread pool architecture** to improve Snow-Owl TFTP's performance under high concurrent load. By distributing client processing across multiple worker threads, we can:
+Phase 4 introduces a **master-worker thread pool architecture** to improve USG-TFTP TFTP's performance under high concurrent load. By distributing client processing across multiple worker threads, we can:
 
 - **Utilize multiple CPU cores** (currently limited to single-threaded Tokio runtime)
 - **Achieve 2-4x concurrent client capacity**
@@ -58,6 +58,7 @@ Phase 4 introduces a **master-worker thread pool architecture** to improve Snow-
 ```
 
 **Limitations:**
+
 - Single CPU core utilization
 - Tokio cooperative scheduling can cause head-of-line blocking
 - Limited by single-threaded event loop performance
@@ -102,6 +103,7 @@ Phase 4 introduces a **master-worker thread pool architecture** to improve Snow-
 ```
 
 **Benefits:**
+
 - Master thread dedicated to fast packet reception
 - Worker threads parallelize client processing
 - Sender thread batches responses efficiently
@@ -486,6 +488,7 @@ async fn sender_thread(
 
 **Risk**: Multi-threaded architecture is harder to debug and maintain
 **Mitigation**:
+
 - Keep worker pool as optional feature
 - Comprehensive logging and metrics
 - Unit tests for each component
@@ -495,6 +498,7 @@ async fn sender_thread(
 
 **Risk**: Channel communication overhead might negate benefits at low loads
 **Mitigation**:
+
 - Only enable for high-concurrency scenarios (>20 clients)
 - Use bounded channels to prevent memory bloat
 - Benchmark thoroughly at various loads
@@ -503,6 +507,7 @@ async fn sender_thread(
 
 **Risk**: Client session state harder to manage across workers
 **Mitigation**:
+
 - Use client-hash strategy for session affinity
 - Keep worker pool stateless (stateful sessions handled in Tokio tasks)
 - Document multi-threaded considerations
@@ -511,6 +516,7 @@ async fn sender_thread(
 
 **Risk**: Worker pool may not benefit all platforms equally
 **Mitigation**:
+
 - Make it opt-in with feature flag
 - Fallback to Phase 3 architecture if disabled
 - Test on Linux, FreeBSD, macOS

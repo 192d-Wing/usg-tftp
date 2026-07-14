@@ -1,10 +1,12 @@
-# Snow-Owl TFTP Phase 2 - Final Benchmark Results
+# USG-TFTP TFTP Phase 2 - Final Benchmark Results
+
 **Date**: 2026-01-19
 **Platform**: Linux 6.14.0-1018-oracle
 
 ## 🎯 Executive Summary
 
 With **50 concurrent clients** and **eBPF/bpftrace syscall tracing**, Phase 2 batch operations show:
+
 - ✅ **Syscall reduction**: **27.5% fewer recv syscalls** (2,983 → 2,163)
 - ✅ **Batch operations working**: Confirmed via eBPF tracing
 - ⚠️ **Throughput improvement**: ~0% on localhost (expected due to TFTP protocol)
@@ -35,11 +37,13 @@ With **50 concurrent clients** and **eBPF/bpftrace syscall tracing**, Phase 2 ba
 ## 🔬 Technical Achievement: eBPF/bpftrace Integration
 
 ### Previous Challenge: strace Failed
+
 - ❌ strace with `-c` flag produced empty output
 - ❌ Tokio async runtime complexity prevented reliable tracing
 - ❌ Multiple attempted fixes (PID attachment, thread following) failed
 
 ### Solution: eBPF/bpftrace
+
 - ✅ Successfully implemented bpftrace syscall counter
 - ✅ Traces all network syscalls system-wide
 - ✅ Zero performance impact (unlike strace)
@@ -60,11 +64,13 @@ tracepoint:syscalls:sys_enter_sendmmsg { @sendmmsg_by_pid[pid]++; @total_sendmms
 ### 1. Syscall Reduction Validates Implementation ✅
 
 **27.5% reduction in recv syscalls proves**:
+
 - Batch operations are executing correctly
 - Multiple packets are being processed per syscall
 - Implementation is working as designed
 
 **Why not using recvmmsg()?**
+
 - The traced `recvmmsg_calls=0` indicates the code is still using `recvfrom()`
 - This suggests batch recv is processing multiple packets but using the single-packet API
 - Expected behavior: actual `recvmmsg()` usage would show in traces
@@ -74,7 +80,9 @@ tracepoint:syscalls:sys_enter_sendmmsg { @sendmmsg_by_pid[pid]++; @total_sendmms
 ### 2. Why 0% Throughput Improvement on Localhost?
 
 #### A. TFTP Protocol Bottleneck (Fundamental)
+
 TFTP is **stop-and-wait** protocol:
+
 ```
 Client → RRQ
 Server → DATA#1 ← [Must wait for ACK before sending #2]
@@ -85,6 +93,7 @@ Client → ACK#2
 ```
 
 **Key constraint**: Each file transfer is strictly serial
+
 - Batch recv can only help with *concurrent* requests from *different* clients
 - Cannot batch DATA packets within a single transfer
 - Syscall reduction doesn't translate to throughput on localhost
@@ -92,6 +101,7 @@ Client → ACK#2
 #### B. Localhost Testing Eliminates Network Benefits
 
 Testing on 127.0.0.1 means:
+
 - **Near-zero latency**: No RTT to hide syscall overhead
 - **Memory copies**: Not real network I/O
 - **No congestion**: Packets never coalesce
@@ -102,6 +112,7 @@ Testing on 127.0.0.1 means:
 #### C. Small File Size + Burst Workload
 
 100KB file × 50 clients = small dataset:
+
 - Each client: ~13 packets (100KB ÷ 8KB blocks)
 - Total: 650 packets across all clients
 - Duration: ~25 seconds
@@ -110,6 +121,7 @@ Testing on 127.0.0.1 means:
 ### 3. Expected Real-World Performance
 
 In production with:
+
 - **WAN latency** (50-200ms RTT)
 - **Sustained load** (continuous client arrivals)
 - **Larger files** (10-100MB firmware images)
@@ -118,6 +130,7 @@ In production with:
 **Expected improvements**: **20-40% throughput gain**
 
 The 27% syscall reduction would directly translate to:
+
 - Lower CPU usage (20-30% reduction in network I/O overhead)
 - Better responsiveness under load
 - Higher sustainable concurrency
@@ -127,6 +140,7 @@ The 27% syscall reduction would directly translate to:
 ### Implementation Status: **VALIDATED** ✅
 
 The eBPF tracing confirms:
+
 1. ✅ Batch operations reduce syscall count by 27%
 2. ✅ Code is executing batch receive path
 3. ✅ Performance characteristics match expectations
@@ -144,6 +158,7 @@ The eBPF tracing confirms:
 ### Why Predictions Are Conservative
 
 TFTP stop-and-wait protocol means:
+
 - Each file transfer is serialized
 - Batching only helps with concurrent clients
 - Maximum theoretical gain: 40-50% (not 2x)
@@ -156,6 +171,7 @@ TFTP stop-and-wait protocol means:
 **Status**: Implementation is production-ready
 
 **Evidence**:
+
 - ✅ 27% syscall reduction confirmed
 - ✅ No throughput regression
 - ✅ Code quality is high
@@ -189,6 +205,7 @@ buffer_pool_size = 256   # Scale with expected concurrency
 ### 3. Monitoring Metrics
 
 Track these in production:
+
 - Average syscalls per client connection
 - CPU usage under sustained load
 - Throughput per client (MB/s)
@@ -209,6 +226,7 @@ Server → DATA#17, DATA#18, ..., DATA#32
 ```
 
 **Benefits**:
+
 - Allows multiple DATA packets in flight
 - True batching within single transfer
 - Expected improvement: **2-5x throughput**
@@ -232,6 +250,7 @@ For maximum performance:
 ## 📋 Benchmark Configuration Details
 
 ### Test Environment
+
 - **Platform**: Linux 6.14.0-1018-oracle
 - **Network**: Localhost (127.0.0.1)
 - **File size**: 10 MB
@@ -240,6 +259,7 @@ For maximum performance:
 - **Test duration**: ~25 seconds per configuration
 
 ### Tracing Method
+
 - **Tool**: bpftrace v0.20.2
 - **Method**: eBPF kernel tracepoints
 - **Syscalls traced**: recvfrom, recvmmsg, sendto, sendmmsg
@@ -248,6 +268,7 @@ For maximum performance:
 ### Configuration Tested
 
 **Without Batch**:
+
 ```toml
 [performance.platform.batch]
 enable_sendmmsg = false
@@ -255,6 +276,7 @@ enable_recvmmsg = false
 ```
 
 **With Batch**:
+
 ```toml
 [performance.platform.batch]
 enable_sendmmsg = true
@@ -268,6 +290,7 @@ batch_timeout_us = 100
 ### Phase 2 Status: **PRODUCTION READY** ✅
 
 The implementation is validated and ready:
+
 1. ✅ **27% syscall reduction** confirmed via eBPF
 2. ✅ No throughput regression
 3. ✅ High code quality
@@ -286,6 +309,7 @@ The implementation is validated and ready:
 ### The 27% Syscall Reduction Is Meaningful
 
 Even with 0% localhost throughput improvement, the **27% syscall reduction**:
+
 - Reduces CPU load by 20-30%
 - Improves system responsiveness
 - Increases sustainable concurrent connections

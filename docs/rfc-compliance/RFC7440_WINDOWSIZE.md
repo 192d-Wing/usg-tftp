@@ -2,7 +2,7 @@
 
 ## Overview
 
-This document describes the implementation of RFC 7440 "TFTP Windowsize Option" in Snow-Owl TFTP server. RFC 7440 extends the traditional TFTP stop-and-wait protocol with a sliding window mechanism, significantly improving throughput on high-latency networks.
+This document describes the implementation of RFC 7440 "TFTP Windowsize Option" in USG-TFTP TFTP server. RFC 7440 extends the traditional TFTP stop-and-wait protocol with a sliding window mechanism, significantly improving throughput on high-latency networks.
 
 ## RFC 7440 Specification Summary
 
@@ -18,14 +18,16 @@ This document describes the implementation of RFC 7440 "TFTP Windowsize Option" 
 
 ### Protocol Behavior
 
-#### Traditional TFTP (windowsize=1):
+#### Traditional TFTP (windowsize=1)
+
 ```
 Server → DATA#1 [WAIT] ← ACK#1
 Server → DATA#2 [WAIT] ← ACK#2
 Server → DATA#3 [WAIT] ← ACK#3
 ```
 
-#### RFC 7440 Windowed TFTP (windowsize=4):
+#### RFC 7440 Windowed TFTP (windowsize=4)
+
 ```
 Server → DATA#1
 Server → DATA#2
@@ -197,11 +199,13 @@ default_windowsize = 16  # Recommended for typical networks
 RFC 7440 significantly reduces the impact of round-trip time (RTT) on throughput:
 
 **Traditional TFTP (windowsize=1)**:
+
 ```
 Throughput ≈ BlockSize / RTT
 ```
 
 **Windowed TFTP (windowsize=N)**:
+
 ```
 Throughput ≈ (BlockSize × WindowSize) / RTT
 ```
@@ -233,6 +237,7 @@ Network: 100ms RTT, 8KB block size
 RFC 7440 specifies: *"the receiver SHOULD notify the sender by sending an ACK corresponding to the last data block correctly received."*
 
 The implementation retransmits the entire window on:
+
 - **Timeout** waiting for ACK
 - **Duplicate ACK** (indicates packet loss)
 - **Out-of-order ACK** (block number mismatch)
@@ -242,6 +247,7 @@ The implementation retransmits the entire window on:
 RFC 7440 requires: *"Traffic with windowsize = 1 MUST be equivalent to traffic specified by RFC 1350."*
 
 The implementation ensures:
+
 - `windowsize=1` behaves identically to traditional TFTP
 - Backward compatibility with RFC 1350 clients
 - Default configuration uses `windowsize=1`
@@ -251,6 +257,7 @@ The implementation ensures:
 ### Denial of Service (DoS)
 
 Large windowsize values can amplify bandwidth consumption. The server:
+
 - **Validates windowsize** ≤ 65535 (RFC limit)
 - **Rejects invalid values** and falls back to default
 - **Can negotiate down** if client requests excessive windowsize
@@ -258,6 +265,7 @@ Large windowsize values can amplify bandwidth consumption. The server:
 ### Resource Exhaustion
 
 Each window requires buffering multiple packets in memory. The server:
+
 - **Limits window buffer size** to configured maximum
 - **Validates file sizes** against `max_file_size_bytes` before windowing
 - **Uses streaming mode** for large files to minimize memory usage
@@ -290,7 +298,7 @@ tftp -c get -l test.bin -r test.bin 192.168.1.10
 ## References
 
 - **RFC 7440**: TFTP Windowsize Option
-  - https://datatracker.ietf.org/doc/html/rfc7440
+  - <https://datatracker.ietf.org/doc/html/rfc7440>
 - **RFC 1350**: The TFTP Protocol (Revision 2)
 - **RFC 2347**: TFTP Option Extension
 - **RFC 2348**: TFTP Blocksize Option

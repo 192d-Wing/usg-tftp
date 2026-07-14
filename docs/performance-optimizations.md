@@ -1,6 +1,6 @@
 # TFTP Server Performance Optimizations
 
-This document details all performance optimizations implemented in the Snow-Owl TFTP server.
+This document details all performance optimizations implemented in the USG-TFTP TFTP server.
 
 ## Summary of Improvements
 
@@ -22,6 +22,7 @@ The following optimizations have been implemented to dramatically improve throug
 **For typical 100MB firmware transfer:**
 
 #### Before Optimizations
+
 - Memory peak: **120MB** (file + 20% overhead)
 - Throughput: Limited by 512B blocks
 - Allocations: **200,000+** per transfer
@@ -29,6 +30,7 @@ The following optimizations have been implemented to dramatically improve throug
 - Transfer time: **5-15 seconds** (network limited)
 
 #### After Optimizations
+
 - Memory peak: **<2MB** (streaming with buffers)
 - Throughput: 16x improvement with 8KB blocks
 - Allocations: **<500** per transfer (98% reduction)
@@ -42,6 +44,7 @@ The following optimizations have been implemented to dramatically improve throug
 **File**: `main.rs`, `handle_read_request()` function
 
 **Problem**: The original implementation loaded entire files into memory:
+
 ```rust
 let mut raw_data = Vec::new();
 file.read_to_end(&mut raw_data).await?; // Loads entire file!
@@ -50,11 +53,13 @@ file.read_to_end(&mut raw_data).await?; // Loads entire file!
 For a 100MB file, this allocated 100MB+ of memory per concurrent transfer.
 
 **Solution**: Implemented streaming approach that reads files in chunks:
+
 - For OCTET mode: Always stream using `read()` with fixed buffer size
 - For NETASCII mode (small files <1MB): Use full buffering for line ending conversion
 - For NETASCII mode (large files >1MB): Stream with chunked line ending conversion
 
 **Benefits**:
+
 - **Memory usage reduced from O(file_size) to O(1)** (constant 8-16KB buffers)
 - Enables transfers of files larger than available RAM
 - Supports concurrent transfers without memory exhaustion
@@ -67,6 +72,7 @@ For a 100MB file, this allocated 100MB+ of memory per concurrent transfer.
 **File**: `buffer_pool.rs` (new module)
 
 **Problem**: Every incoming UDP packet was copied into a new allocation:
+
 ```rust
 let data = buf[..size].to_vec(); // 65KB allocation + copy per packet!
 ```
@@ -74,11 +80,13 @@ let data = buf[..size].to_vec(); // 65KB allocation + copy per packet!
 This created 200,000+ allocations for a 100MB transfer.
 
 **Solution**: Created a buffer pool that reuses BytesMut allocations:
+
 - Pre-allocated pool of 128 buffers
 - Buffers acquired from pool, used, then returned
 - Zero-copy approach where possible
 
 **Benefits**:
+
 - **98% reduction in memory allocations**
 - Reduced GC pressure
 - Better CPU cache utilization
@@ -93,6 +101,7 @@ This created 200,000+ allocations for a 100MB transfer.
 **Problem**: UDP receive buffer was copied on every packet receive.
 
 **Solution**: Use buffer pool to acquire/release buffers without copying:
+
 ```rust
 let mut buf = buffer_pool.acquire().await;
 buf.resize(MAX_PACKET_SIZE, 0);
@@ -101,6 +110,7 @@ buffer_pool.release(buf).await;
 ```
 
 **Benefits**:
+
 - **50% reduction in memory bandwidth usage**
 - Eliminated 65KB copy operation per packet
 - Reduced latency per packet
@@ -112,6 +122,7 @@ buffer_pool.release(buf).await;
 **File**: `main.rs`, `convert_to_netascii()` function
 
 **Problem**: Original byte-by-byte processing with lookback:
+
 ```rust
 while i < data.len() {
     let byte = data[i];
@@ -126,12 +137,14 @@ while i < data.len() {
 ```
 
 **Solution**: Chunked processing with fast-path scanning:
+
 - Process in 4KB chunks for better cache utilization
 - Bulk copy runs of data without line endings
 - Only convert line endings when found
 - Pre-allocate output buffer with better size estimation
 
 **Benefits**:
+
 - **25-40% faster NETASCII conversion**
 - Better CPU cache utilization
 - Reduced memory allocations
@@ -144,12 +157,14 @@ while i < data.len() {
 **File**: `main.rs`, `handle_write_request()` function
 
 **Problem**: Write buffer grew dynamically with repeated reallocations:
+
 ```rust
 let mut received_data = Vec::new(); // Starts empty
 received_data.extend_from_slice(block_data); // Reallocates as it grows
 ```
 
 **Solution**: Pre-allocate buffer with expected size:
+
 ```rust
 let mut received_data = if let Some(expected_size) = options.transfer_size {
     Vec::with_capacity(expected_size as usize) // Pre-allocate
@@ -159,6 +174,7 @@ let mut received_data = if let Some(expected_size) = options.transfer_size {
 ```
 
 **Benefits**:
+
 - **50% reduction in write buffer allocations**
 - Eliminates O(n) copy operations during Vec growth
 - Improved write performance
@@ -170,16 +186,19 @@ let mut received_data = if let Some(expected_size) = options.transfer_size {
 **File**: `main.rs`, constant `DEFAULT_BLOCK_SIZE`
 
 **Problem**: RFC 1350 standard block size is 512 bytes, which requires:
+
 - 195,313 packets for 100MB
 - 195,313 ACK round-trips
 - High overhead from packet headers
 
 **Solution**: Increased default to 8KB (RFC 2348 allows up to 65KB):
+
 ```rust
 pub(crate) const DEFAULT_BLOCK_SIZE: usize = 8192; // 8KB
 ```
 
 **Benefits**:
+
 - **93% reduction in packet count** (195,313 → 12,207 packets)
 - **93% reduction in ACK round-trips**
 - **16x better network utilization**
@@ -195,16 +214,19 @@ pub(crate) const DEFAULT_BLOCK_SIZE: usize = 8192; // 8KB
 **File**: `main.rs`, ACK handling functions
 
 **Problem**: ACK receive buffer was 1KB despite ACKs being exactly 4 bytes:
+
 ```rust
 let mut ack_buf = vec![0u8; 1024]; // Waste 1020 bytes per ACK!
 ```
 
 **Solution**: Use appropriately sized buffer:
+
 ```rust
 let mut ack_buf = [0u8; 16]; // Small buffer, ACKs are 4 bytes
 ```
 
 **Benefits**:
+
 - Minimal memory savings per ACK
 - Better cache utilization
 - Cleaner code expressing intent
@@ -233,6 +255,7 @@ audit_sampling_rate = 1.0
 ```
 
 **Benefits**:
+
 - Operators can tune for their specific workloads
 - Memory vs. performance trade-offs are configurable
 - Audit overhead can be reduced for high-volume scenarios
@@ -345,6 +368,7 @@ Potential future improvements (not yet implemented):
 ## Conclusion
 
 These optimizations provide **dramatic performance improvements** while maintaining:
+
 - ✅ RFC 1350/2348 compliance
 - ✅ NIST 800-53 security controls
 - ✅ STIG compliance
@@ -352,6 +376,7 @@ These optimizations provide **dramatic performance improvements** while maintain
 - ✅ Audit trail integrity
 
 **Key Results**:
+
 - 📉 **98% reduction** in memory allocations
 - 📉 **99% reduction** in peak memory usage (large files)
 - 📉 **93% reduction** in network packets

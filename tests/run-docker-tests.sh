@@ -11,7 +11,7 @@ BLUE='\033[0;34m'
 NC='\033[0m' # No Color
 
 echo -e "${BLUE}================================================${NC}"
-echo -e "${BLUE}  Snow-Owl TFTP Docker Integration Tests${NC}"
+echo -e "${BLUE}  USG-TFTP TFTP Docker Integration Tests${NC}"
 echo -e "${BLUE}================================================${NC}"
 echo ""
 

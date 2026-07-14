@@ -1,4 +1,4 @@
-# Dockerfile for running Snow-Owl TFTP integration tests
+# Dockerfile for running USG-TFTP TFTP integration tests
 FROM rust:1.92-trixie
 
 # Install required packages

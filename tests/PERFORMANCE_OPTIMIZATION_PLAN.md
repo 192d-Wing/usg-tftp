@@ -1,4 +1,4 @@
-# Snow-Owl TFTP Performance Optimization Plan
+# USG-TFTP TFTP Performance Optimization Plan
 
 **Date**: 2026-01-19
 **Last Updated**: 2026-01-19 (RFC 7440 Implementation)
@@ -9,6 +9,7 @@
 ### ✅ Phase 2.5: COMPLETED (2026-01-19)
 
 **recvmmsg() Fix Applied**:
+
 - ✅ Changed from MSG_DONTWAIT to timeout-based waiting (1ms timeout)
 - ✅ Fixed fallback logic to retry instead of giving up
 - ✅ Increased batch_timeout_us from 100μs to 1000μs
@@ -21,6 +22,7 @@
 **Status**: Fully implemented and ready for testing
 
 **Code Changes**:
+
 - ✅ Connected `default_windowsize` config to TftpOptions initialization
 - ✅ Updated RRQ and WRQ handlers to use configured windowsize
 - ✅ Windowed transmission already implemented (buffered + streaming modes)
@@ -31,6 +33,7 @@
 **Documentation**: See [RFC7440_IMPLEMENTATION_SUMMARY.md](RFC7440_IMPLEMENTATION_SUMMARY.md)
 
 ### Previous Benchmark Results (Before Fixes)
+
 - **Syscall reduction**: 27.5% (2,983 → 2,163 recvfrom calls)
 - **recvmmsg() calls**: 0 (❌ NOT BEING USED - NOW FIXED!)
 - **Throughput improvement**: ~0% on localhost
@@ -167,6 +170,7 @@ async fn sender_thread(
 | **Scalability** | Limited | High | Much better |
 
 #### Advantages ✅
+
 1. **True parallelism**: Each worker runs on separate CPU core
 2. **Better batching**: Master thread can batch more aggressively
 3. **Lower latency**: Workers process independently, no blocking
@@ -174,6 +178,7 @@ async fn sender_thread(
 5. **Fault isolation**: Worker crashes don't affect others
 
 #### Challenges ⚠️
+
 1. **Complexity**: More complex than single-threaded
 2. **State management**: Client sessions need shared state
 3. **Memory**: More overhead for channels and buffers
@@ -184,6 +189,7 @@ async fn sender_thread(
 **Immediate actions**:
 
 1. **Disable adaptive batching for testing**:
+
 ```toml
 [performance.platform.batch]
 enable_recvmmsg = true
@@ -193,7 +199,8 @@ batch_timeout_us = 100
 enable_adaptive_batching = false  # Force always-on
 ```
 
-2. **Add debug logging** to trace batch receive execution:
+1. **Add debug logging** to trace batch receive execution:
+
 ```rust
 if use_batch_recv {
     debug!("Attempting batch receive (batch_size={}, clients={})",
@@ -202,9 +209,10 @@ if use_batch_recv {
 }
 ```
 
-3. **Investigate timeout behavior**: The `batch_timeout_us = 100` might be too aggressive
+1. **Investigate timeout behavior**: The `batch_timeout_us = 100` might be too aggressive
 
 **Expected impact**:
+
 - If working correctly: 40-60% syscall reduction (not just 27%)
 - Throughput: Still limited by TFTP protocol on localhost
 
@@ -213,6 +221,7 @@ if use_batch_recv {
 **The TFTP protocol limitation is the real bottleneck.**
 
 Current TFTP:
+
 ```
 Server → DATA#1
 Client → ACK#1  ← Must wait
@@ -221,6 +230,7 @@ Client → ACK#2  ← Must wait
 ```
 
 RFC 7440 Windowsize:
+
 ```
 Server → DATA#1, DATA#2, ..., DATA#16  ← 16 packets in flight!
 Client → ACK#16  ← Acknowledge entire window
@@ -228,6 +238,7 @@ Server → DATA#17, DATA#18, ..., DATA#32
 ```
 
 #### Implementation Complexity
+
 - **Difficulty**: Medium
 - **Time estimate**: 1-2 weeks
 - **Lines of code**: ~500-800 LOC
@@ -279,6 +290,7 @@ async fn uring_recv_loop(ring: &mut IoUring) {
 | **Latency** | Same | -30-40% | Better |
 
 #### Challenges
+
 - **Linux-only**: No FreeBSD/macOS support
 - **Complexity**: Significant implementation effort
 - **Kernel version**: Requires Linux 5.1+ (io_uring)
@@ -297,6 +309,7 @@ async fn uring_recv_loop(ring: &mut IoUring) {
 **Outcome**: recvmmsg() fix implemented, expected 60-80% syscall reduction
 
 **Files Changed**:
+
 - `src/main.rs`: Lines 124-189 (timeout-based recvmmsg), 663-675, 765-774
 
 ### ✅ Phase 3: RFC 7440 Windowsize - COMPLETED
@@ -312,10 +325,12 @@ async fn uring_recv_loop(ring: &mut IoUring) {
 **Outcome**: RFC 7440 fully functional and ready for testing
 
 **Expected Performance**:
+
 - **3-5x throughput improvement** even on localhost
 - **10-20x improvement** on high-latency networks
 
 **Files Changed**:
+
 - `src/main.rs`: Lines 842-852 (added default_windowsize parameter), 735, 795, 896-899, 1189-1192
 
 **Documentation**: [RFC7440_IMPLEMENTATION_SUMMARY.md](RFC7440_IMPLEMENTATION_SUMMARY.md)
@@ -330,6 +345,7 @@ async fn uring_recv_loop(ring: &mut IoUring) {
 4. Benchmark and tune
 
 **Expected outcome**:
+
 - **2-4x concurrent client capacity**
 - Better CPU utilization
 - Lower latency under load
@@ -344,6 +360,7 @@ async fn uring_recv_loop(ring: &mut IoUring) {
 4. Production hardening
 
 **Expected outcome**:
+
 - **50-100% additional throughput**
 - **50% CPU reduction**
 - Linux-only initially
@@ -372,6 +389,7 @@ sudo ./benchmark-phase2.sh
 ### 2. Increase Batch Timeout
 
 The 100μs timeout might be too aggressive. Try:
+
 ```toml
 batch_timeout_us = 1000  # 1ms - more realistic
 ```
@@ -379,6 +397,7 @@ batch_timeout_us = 1000  # 1ms - more realistic
 ### 3. Verify Client Counting Logic
 
 Add logging to track active client count:
+
 ```rust
 let current = active_clients.load(Ordering::Relaxed);
 debug!("Active clients: {}, threshold: {}, batch: {}",

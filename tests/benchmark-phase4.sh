@@ -42,7 +42,7 @@ MEDIUM_FILE="test-100kb.bin"
 LARGE_FILE="test-10mb.bin"
 
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
-echo -e "${BLUE}  Snow-Owl TFTP Phase 4 Benchmark Suite${NC}"
+echo -e "${BLUE}  USG-TFTP TFTP Phase 4 Benchmark Suite${NC}"
 echo -e "${BLUE}  Testing: Multi-threaded Worker Pool${NC}"
 echo -e "${BLUE}━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━${NC}"
 echo ""
@@ -256,9 +256,9 @@ start_server() {
 
     # Create log directory if it doesn't exist
     if command -v sudo &> /dev/null && [ "$EUID" -ne 0 ]; then
-        sudo mkdir -p /var/log/snow-owl 2>/dev/null || true
+        sudo mkdir -p /var/log/usg-tftp 2>/dev/null || true
     else
-        mkdir -p /var/log/snow-owl 2>/dev/null || true
+        mkdir -p /var/log/usg-tftp 2>/dev/null || true
     fi
 
     # Kill any existing server
@@ -500,7 +500,7 @@ generate_report() {
 
     cat > "$report_file" << EOF
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  Snow-Owl TFTP Phase 4 Benchmark Results
+  USG-TFTP TFTP Phase 4 Benchmark Results
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 Test Date: $(date '+%Y-%m-%d %H:%M:%S')

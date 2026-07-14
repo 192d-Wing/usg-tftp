@@ -1,14 +1,14 @@
-# Snow-Owl TFTP Server Configuration
+# USG-TFTP TFTP Server Configuration
 # Phase 1 Performance Optimizations Example
 
-root_dir = "/var/lib/snow-owl/tftp"
+root_dir = "/var/lib/usg-tftp/tftp"
 bind_addr = "0.0.0.0:69"
-max_file_size_bytes = 104857600  # 100 MB
+max_file_size_bytes = 104857600     # 100 MB
 
 [logging]
 level = "info"
 format = "json"
-file = "/var/log/snow-owl/tftp-audit.json"
+file = "/var/log/usg-tftp/tftp-audit.json"
 audit_enabled = true
 
 [write_config]
@@ -28,7 +28,7 @@ default_block_size = 8192
 buffer_pool_size = 128
 
 # Files larger than this use streaming mode
-streaming_threshold = 1048576  # 1 MB
+streaming_threshold = 1048576 # 1 MB
 
 # Audit sampling rate (1.0 = log everything)
 audit_sampling_rate = 1.0
@@ -37,8 +37,8 @@ audit_sampling_rate = 1.0
 [performance.platform.socket]
 # Socket buffer sizes in KB
 # Larger buffers reduce packet drops under high load
-recv_buffer_kb = 2048  # 2 MB - reduces packet loss by 70-80%
-send_buffer_kb = 2048  # 2 MB - improves burst handling
+recv_buffer_kb = 2048 # 2 MB - reduces packet loss by 70-80%
+send_buffer_kb = 2048 # 2 MB - improves burst handling
 
 # Enable address reuse for faster server restarts
 reuse_address = true

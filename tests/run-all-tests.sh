@@ -21,7 +21,7 @@ TOTAL_SKIPPED=0
 print_header() {
     echo -e "${CYAN}╔════════════════════════════════════════════════╗${NC}"
     echo -e "${CYAN}║                                                ║${NC}"
-    echo -e "${CYAN}║      Snow-Owl TFTP Test Suite Runner          ║${NC}"
+    echo -e "${CYAN}║      USG-TFTP TFTP Test Suite Runner          ║${NC}"
     echo -e "${CYAN}║                                                ║${NC}"
     echo -e "${CYAN}╔════════════════════════════════════════════════╗${NC}"
     echo ""

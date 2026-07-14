@@ -641,6 +641,7 @@ Sender Thread (batch send via sendmmsg)
 **Implementation Status:**
 
 ✅ **Completed:**
+
 - WorkerPool data structures (`IncomingPacket`, `OutgoingPacket`, statistics)
 - Master receiver loop with packet distribution
 - Worker thread skeleton with placeholder packet processing
@@ -651,6 +652,7 @@ Sender Thread (batch send via sendmmsg)
 - Statistics tracking (packets processed, latency, errors)
 
 ⏳ **In Progress:**
+
 - TFTP packet processing in workers (parse opcodes, handle RRQ/WRQ/DATA/ACK)
 - Session state management across workers
 - Integration testing with concurrent clients
@@ -1420,7 +1422,7 @@ systemctl reload usg-tftp
 
 For questions, suggestions, or issues related to this roadmap:
 
-- GitHub Issues: <https://github.com/192d-Wing/Snow-Owl/issues>
+- GitHub Issues: <https://github.com/192d-Wing/USG-TFTP/issues>
 - Label: `performance` + `tftp`
 
 ---
