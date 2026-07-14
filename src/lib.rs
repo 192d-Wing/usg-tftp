@@ -55,8 +55,8 @@ pub mod server {
 pub use server::TftpServer;
 
 // Re-export commonly used types
-pub use error::{Result, TftpError};
 pub use config::TftpConfig;
+pub use error::{Result, TftpError};
 
 // RFC 1350 - The TFTP Protocol (Revision 2)
 pub const DEFAULT_BLOCK_SIZE: usize = 512; // RFC 1350 standard for compatibility
@@ -169,10 +169,10 @@ impl TransferMode {
 // TFTP Options (RFC 2347/2348/2349/7440)
 #[derive(Debug, Clone)]
 pub struct TftpOptions {
-    pub block_size: usize,              // RFC 2348 - Block Size Option
-    pub timeout: u64,                   // RFC 2349 - Timeout Interval Option
-    pub transfer_size: Option<u64>,     // RFC 2349 - Transfer Size Option
-    pub windowsize: usize,              // RFC 7440 - Windowsize Option (1-65535 blocks)
+    pub block_size: usize,          // RFC 2348 - Block Size Option
+    pub timeout: u64,               // RFC 2349 - Timeout Interval Option
+    pub transfer_size: Option<u64>, // RFC 2349 - Transfer Size Option
+    pub windowsize: usize,          // RFC 7440 - Windowsize Option (1-65535 blocks)
 }
 
 impl Default for TftpOptions {

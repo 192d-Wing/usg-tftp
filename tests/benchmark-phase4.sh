@@ -32,7 +32,7 @@ PROJECT_ROOT="$(cd "$SCRIPT_DIR/../../.." && pwd)"
 TFTP_ROOT="$SCRIPT_DIR"
 TEST_DIR="$TFTP_ROOT/benchmark-test"
 RESULTS_DIR="$TEST_DIR/results"
-BINARY="$PROJECT_ROOT/target/release/snow-owl-tftp-server"
+BINARY="$PROJECT_ROOT/target/release/usg-tftp-server"
 SERVER_PORT=6969  # Non-privileged port for testing
 CONCURRENT_CLIENTS=50  # Match Phase 2 for fair comparison
 
@@ -106,8 +106,8 @@ build_binary() {
         rm -f "$BINARY"
     fi
 
-    print_info "Running: cargo build --release -p snow-owl-tftp"
-    cargo build --release -p snow-owl-tftp
+    print_info "Running: cargo build --release -p usg-tftp"
+    cargo build --release -p usg-tftp
 
     sleep 2
 

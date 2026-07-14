@@ -259,7 +259,7 @@ Set up test on actual network with measurable latency:
 
 ```bash
 # On server
-./snow-owl-tftp --config windowsize-16.toml
+./usg-tftp --config windowsize-16.toml
 
 # On remote client (with atftp or compatible TFTP client)
 time tftp -m binary -c get largefile.bin server_ip
@@ -340,7 +340,7 @@ Test with various TFTP clients:
 ### Step 1: Build the Server
 
 ```bash
-cargo build --release --package snow-owl-tftp
+cargo build --release --package usg-tftp
 ```
 
 ### Step 2: Create Test Configuration
@@ -366,7 +366,7 @@ EOF
 ### Step 3: Run Server
 
 ```bash
-./target/release/snow-owl-tftp --config /tmp/test-windowsize.toml
+./target/release/usg-tftp --config /tmp/test-windowsize.toml
 ```
 
 ### Step 4: Test with Client

@@ -145,15 +145,15 @@ start_server() {
     SERVER_BIN=""
 
     # Try project root paths first
-    if [ -f "../../../target/release/snow-owl-tftp-server" ]; then
-        SERVER_BIN="../../../target/release/snow-owl-tftp-server"
-    elif [ -f "../../../target/debug/snow-owl-tftp-server" ]; then
-        SERVER_BIN="../../../target/debug/snow-owl-tftp-server"
+    if [ -f "../target/release/usg-tftp-server" ]; then
+        SERVER_BIN="../target/release/usg-tftp-server"
+    elif [ -f "../target/debug/usg-tftp-server" ]; then
+        SERVER_BIN="../target/debug/usg-tftp-server"
     # Try from crate directory
-    elif [ -f "../../target/release/snow-owl-tftp-server" ]; then
-        SERVER_BIN="../../target/release/snow-owl-tftp-server"
-    elif [ -f "../../target/debug/snow-owl-tftp-server" ]; then
-        SERVER_BIN="../../target/debug/snow-owl-tftp-server"
+    elif [ -f "../target/release/usg-tftp-server" ]; then
+        SERVER_BIN="../target/release/usg-tftp-server"
+    elif [ -f "../target/debug/usg-tftp-server" ]; then
+        SERVER_BIN="../target/debug/usg-tftp-server"
     else
         echo -e "${RED}ERROR: Server binary not found.${NC}"
         echo -e "${RED}Please run 'cargo build --release' from the project root first.${NC}"

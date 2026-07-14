@@ -298,11 +298,7 @@ mod tests {
 
     fn temp_dir(name: &str) -> std::io::Result<PathBuf> {
         let mut dir = std::env::temp_dir();
-        dir.push(format!(
-            "snow_owl_tftp_test_{}_{}",
-            name,
-            uuid::Uuid::new_v4()
-        ));
+        dir.push(format!("usg_tftp_test_{}_{}", name, uuid::Uuid::new_v4()));
         std::fs::create_dir_all(&dir)?;
         Ok(dir)
     }
@@ -351,7 +347,7 @@ file = "{}/tftp.log"
     fn rejects_unreadable_root_dir() -> std::result::Result<(), Box<dyn std::error::Error>> {
         let log_dir = temp_dir("unreadable_log")?;
         let config = TftpConfig {
-            root_dir: PathBuf::from("/nonexistent/snow-owl-tftp"),
+            root_dir: PathBuf::from("/nonexistent/usg-tftp"),
             logging: LoggingConfig {
                 file: Some(log_dir.join("tftp.log")),
                 ..Default::default()
@@ -420,7 +416,7 @@ file = "{}/tftp.log"
     -> std::result::Result<(), Box<dyn std::error::Error>> {
         let mut config = TftpConfig::default();
         config.root_dir = temp_dir("logfile")?;
-        config.logging.file = Some(PathBuf::from("/nonexistent/snow-owl-tftp/log.txt"));
+        config.logging.file = Some(PathBuf::from("/nonexistent/usg-tftp/log.txt"));
         match validate_config(&config, false) {
             Ok(()) => return Err("expected error for logging.file parent".into()),
             Err(err) => {

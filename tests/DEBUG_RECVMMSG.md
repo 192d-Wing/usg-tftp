@@ -80,7 +80,7 @@ Also updated existing [configs/with-batch.toml](benchmark-test/configs/with-batc
 ### 3. Rebuilt Binary
 
 ```bash
-cargo build --release --package snow-owl-tftp
+cargo build --release --package usg-tftp
 ```
 
 Binary rebuilt successfully with debug logging at [main.rs:680-754](../src/main.rs#L680-L754)
@@ -260,7 +260,7 @@ adaptive_batch_threshold = 0
 
 1. Modify `src/main.rs:151-157` as shown above
 2. Add `batch_timeout_us` parameter to `batch_recv_packets()` function
-3. Rebuild: `cargo build --release --package snow-owl-tftp`
+3. Rebuild: `cargo build --release --package usg-tftp`
 4. Run benchmark: `sudo ./tests/benchmark-phase2.sh`
 5. Check eBPF output: `recvmmsg_calls` should be > 0
 

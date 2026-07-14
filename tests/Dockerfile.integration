@@ -16,10 +16,10 @@ WORKDIR /app
 COPY . .
 
 # Build the TFTP server in release mode
-RUN cargo build --release --manifest-path crates/snow-owl-tftp/Cargo.toml
+RUN cargo build --release --manifest-path crates/usg-tftp/Cargo.toml
 
 # Set working directory to tests
-WORKDIR /app/crates/snow-owl-tftp/tests
+WORKDIR /app/crates/usg-tftp/tests
 
 # Make the test script executable
 RUN chmod +x integration-test.sh

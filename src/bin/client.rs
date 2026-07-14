@@ -1,14 +1,13 @@
 // Snow-Owl TFTP Client Binary
 #![allow(dead_code)]
 
-use snow_owl_tftp::{
-    Result, TftpError, Opcode, TransferMode,
-    DEFAULT_BLOCK_SIZE, MAX_BLOCK_SIZE, MAX_RETRIES,
+use usg_tftp::{
+    DEFAULT_BLOCK_SIZE, MAX_BLOCK_SIZE, MAX_RETRIES, Opcode, Result, TftpError, TransferMode,
 };
 
 use bytes::{Buf, BufMut, BytesMut};
 use clap::Parser;
-use socket2::{Socket, Domain, Type, Protocol};
+use socket2::{Domain, Protocol, Socket, Type};
 use std::net::SocketAddr;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -20,7 +19,7 @@ use tracing::{debug, info, warn};
 
 /// Snow-Owl TFTP Client
 #[derive(Parser, Debug)]
-#[command(name = "snow-owl-tftp-client")]
+#[command(name = "usg-tftp-client")]
 #[command(about = "High-performance TFTP client", long_about = None)]
 struct Cli {
     /// TFTP server address (e.g., 192.168.1.100:69)
@@ -72,7 +71,9 @@ async fn main() -> Result<()> {
         .init();
 
     // Parse server address
-    let server_addr: SocketAddr = cli.server.parse()
+    let server_addr: SocketAddr = cli
+        .server
+        .parse()
         .map_err(|e| TftpError::Tftp(format!("Invalid server address: {}", e)))?;
 
     // Parse transfer mode
@@ -80,7 +81,10 @@ async fn main() -> Result<()> {
 
     // Validate block size
     let block_size = if cli.block_size < 8 || cli.block_size > MAX_BLOCK_SIZE {
-        warn!("Invalid block size {}, using default {}", cli.block_size, DEFAULT_BLOCK_SIZE);
+        warn!(
+            "Invalid block size {}, using default {}",
+            cli.block_size, DEFAULT_BLOCK_SIZE
+        );
         DEFAULT_BLOCK_SIZE
     } else {
         cli.block_size
@@ -92,15 +96,24 @@ async fn main() -> Result<()> {
     // Execute operation
     if let Some(remote_file) = cli.get {
         let local_file = cli.file.unwrap_or_else(|| PathBuf::from(&remote_file));
-        info!("Downloading {} from {} to {:?}", remote_file, server_addr, local_file);
+        info!(
+            "Downloading {} from {} to {:?}",
+            remote_file, server_addr, local_file
+        );
         client.get(&remote_file, &local_file).await?;
         info!("Download complete");
     } else if let Some(local_file) = cli.put {
-        let remote_file = cli.file
+        let remote_file = cli
+            .file
             .and_then(|p| p.to_str().map(String::from))
             .unwrap_or_else(|| local_file.clone());
-        info!("Uploading {:?} to {} as {}", local_file, server_addr, remote_file);
-        client.put(&PathBuf::from(&local_file), &remote_file).await?;
+        info!(
+            "Uploading {:?} to {} as {}",
+            local_file, server_addr, remote_file
+        );
+        client
+            .put(&PathBuf::from(&local_file), &remote_file)
+            .await?;
         info!("Upload complete");
     } else {
         return Err(TftpError::Tftp("Must specify either --get or --put".into()));
@@ -150,7 +163,11 @@ impl TftpClient {
         std_socket.set_nonblocking(true)?;
         let socket = UdpSocket::from_std(std_socket)?;
 
-        debug!("Bound to {:?} with {}KB receive buffer", socket.local_addr()?, buffer_size_kb);
+        debug!(
+            "Bound to {:?} with {}KB receive buffer",
+            socket.local_addr()?,
+            buffer_size_kb
+        );
 
         // Send Read Request (RRQ) to server's listening port
         let mut packet = BytesMut::new();
@@ -197,8 +214,10 @@ impl TftpClient {
 
             let (len, from_addr) = match timeout(
                 Duration::from_secs(self.timeout_secs),
-                socket.recv_from(&mut buf)
-            ).await {
+                socket.recv_from(&mut buf),
+            )
+            .await
+            {
                 Ok(Ok(result)) => result,
                 Ok(Err(e)) => return Err(TftpError::Io(e)),
                 Err(_) => return Err(TftpError::Tftp("Timeout waiting for data".into())),
@@ -231,11 +250,15 @@ impl TftpClient {
                     if block_num < expected_block {
                         // Duplicate block, ignore but send ACK
                         debug!("Duplicate block {} (already processed)", block_num);
-                        self.send_ack_to(&socket, last_ack_sent, server_tid.unwrap()).await?;
+                        self.send_ack_to(&socket, last_ack_sent, server_tid.unwrap())
+                            .await?;
                         continue;
                     } else if block_num > expected_block {
                         // Future block, buffer it
-                        debug!("Buffering out-of-order block {} (expecting {})", block_num, expected_block);
+                        debug!(
+                            "Buffering out-of-order block {} (expecting {})",
+                            block_num, expected_block
+                        );
                         block_buffer.insert(block_num, data);
                         continue;
                     }
@@ -253,32 +276,46 @@ impl TftpClient {
                         let buffered_len = buffered_data.len();
                         file.write_all(&buffered_data).await?;
                         total_bytes += buffered_len;
-                        debug!("Wrote buffered block {} ({} bytes)", expected_block, buffered_len);
+                        debug!(
+                            "Wrote buffered block {} ({} bytes)",
+                            expected_block, buffered_len
+                        );
                         expected_block = expected_block.wrapping_add(1);
                     }
 
                     // RFC 7440: Send ACK after receiving windowsize blocks or final block
                     // Calculate if we've completed a window boundary
-                    let blocks_from_last_ack = expected_block.wrapping_sub(last_ack_sent.wrapping_add(1));
+                    let blocks_from_last_ack =
+                        expected_block.wrapping_sub(last_ack_sent.wrapping_add(1));
                     let should_ack = blocks_from_last_ack as usize >= self.windowsize || is_final;
                     if should_ack {
                         let ack_block = expected_block.wrapping_sub(1);
-                        self.send_ack_to(&socket, ack_block, server_tid.unwrap()).await?;
-                        debug!("Sent ACK for block {} (window complete: {} blocks from last ACK)", ack_block, blocks_from_last_ack);
+                        self.send_ack_to(&socket, ack_block, server_tid.unwrap())
+                            .await?;
+                        debug!(
+                            "Sent ACK for block {} (window complete: {} blocks from last ACK)",
+                            ack_block, blocks_from_last_ack
+                        );
                         last_ack_sent = ack_block;
                     }
 
                     // Check if this was the last block
                     if is_final {
-                        info!("Transfer complete: {} bytes in {:.2}s",
-                            total_bytes, start_time.elapsed().as_secs_f64());
+                        info!(
+                            "Transfer complete: {} bytes in {:.2}s",
+                            total_bytes,
+                            start_time.elapsed().as_secs_f64()
+                        );
                         break;
                     }
                 }
                 Some(Opcode::Error) => {
                     let error_code = bytes.get_u16();
                     let error_msg = String::from_utf8_lossy(&bytes).into_owned();
-                    return Err(TftpError::Tftp(format!("Server error {}: {}", error_code, error_msg)));
+                    return Err(TftpError::Tftp(format!(
+                        "Server error {}: {}",
+                        error_code, error_msg
+                    )));
                 }
                 Some(Opcode::Oack) => {
                     debug!("Received OACK, sending ACK 0");
@@ -313,7 +350,11 @@ impl TftpClient {
         std_socket.connect(self.server_addr)?;
         let socket = UdpSocket::from_std(std_socket)?;
 
-        debug!("Connected to server on {:?} with {}KB receive buffer", socket.local_addr()?, buffer_size_kb);
+        debug!(
+            "Connected to server on {:?} with {}KB receive buffer",
+            socket.local_addr()?,
+            buffer_size_kb
+        );
 
         // Send Write Request (WRQ)
         self.send_wrq(&socket, remote_file, file_size).await?;
@@ -322,8 +363,10 @@ impl TftpClient {
         let mut buf = vec![0u8; 1024];
         let len = match timeout(
             Duration::from_secs(self.timeout_secs),
-            socket.recv(&mut buf)
-        ).await {
+            socket.recv(&mut buf),
+        )
+        .await
+        {
             Ok(Ok(len)) => len,
             Ok(Err(e)) => return Err(TftpError::Io(e)),
             Err(_) => return Err(TftpError::Tftp("Timeout waiting for ACK".into())),
@@ -336,7 +379,10 @@ impl TftpClient {
             Some(Opcode::Ack) => {
                 let block_num = bytes.get_u16();
                 if block_num != 0 {
-                    return Err(TftpError::Tftp(format!("Expected ACK 0, got {}", block_num)));
+                    return Err(TftpError::Tftp(format!(
+                        "Expected ACK 0, got {}",
+                        block_num
+                    )));
                 }
             }
             Some(Opcode::Oack) => {
@@ -345,7 +391,10 @@ impl TftpClient {
             Some(Opcode::Error) => {
                 let error_code = bytes.get_u16();
                 let error_msg = String::from_utf8_lossy(&bytes).into_owned();
-                return Err(TftpError::Tftp(format!("Server error {}: {}", error_code, error_msg)));
+                return Err(TftpError::Tftp(format!(
+                    "Server error {}: {}",
+                    error_code, error_msg
+                )));
             }
             _ => {
                 return Err(TftpError::Tftp(format!("Unexpected opcode: {}", opcode)));
@@ -377,8 +426,10 @@ impl TftpClient {
                 let mut buf = vec![0u8; 1024];
                 match timeout(
                     Duration::from_secs(self.timeout_secs),
-                    socket.recv(&mut buf)
-                ).await {
+                    socket.recv(&mut buf),
+                )
+                .await
+                {
                     Ok(Ok(len)) => {
                         let mut bytes = BytesMut::from(&buf[..len]);
                         let opcode = bytes.get_u16();
@@ -394,7 +445,10 @@ impl TftpClient {
                             Some(Opcode::Error) => {
                                 let error_code = bytes.get_u16();
                                 let error_msg = String::from_utf8_lossy(&bytes).into_owned();
-                                return Err(TftpError::Tftp(format!("Server error {}: {}", error_code, error_msg)));
+                                return Err(TftpError::Tftp(format!(
+                                    "Server error {}: {}",
+                                    error_code, error_msg
+                                )));
                             }
                             _ => {}
                         }
@@ -405,14 +459,20 @@ impl TftpClient {
                         if retries >= MAX_RETRIES {
                             return Err(TftpError::Tftp("Max retries exceeded".into()));
                         }
-                        warn!("Timeout waiting for ACK {}, retrying ({}/{})", block_num, retries, MAX_RETRIES);
+                        warn!(
+                            "Timeout waiting for ACK {}, retrying ({}/{})",
+                            block_num, retries, MAX_RETRIES
+                        );
                     }
                 }
             }
 
             if bytes_read < self.block_size {
-                info!("Transfer complete: {} bytes in {:.2}s",
-                    total_bytes, start_time.elapsed().as_secs_f64());
+                info!(
+                    "Transfer complete: {} bytes in {:.2}s",
+                    total_bytes,
+                    start_time.elapsed().as_secs_f64()
+                );
                 break;
             }
 
@@ -466,7 +526,12 @@ impl TftpClient {
     }
 
     /// Send ACK packet to specific address
-    async fn send_ack_to(&self, socket: &UdpSocket, block_num: u16, addr: SocketAddr) -> Result<()> {
+    async fn send_ack_to(
+        &self,
+        socket: &UdpSocket,
+        block_num: u16,
+        addr: SocketAddr,
+    ) -> Result<()> {
         let mut packet = BytesMut::with_capacity(4);
         packet.put_u16(Opcode::Ack as u16);
         packet.put_u16(block_num);

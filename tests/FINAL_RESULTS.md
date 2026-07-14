@@ -272,7 +272,7 @@ This addresses the fundamental TFTP protocol limitation and provides the biggest
 ### Build Status
 
 - ✅ Code compiled successfully
-- ✅ Binary rebuilt: `target/release/snow-owl-tftp`
+- ✅ Binary rebuilt: `target/release/usg-tftp`
 - ✅ Build time: ~45 seconds
 - ✅ No compilation errors or warnings
 

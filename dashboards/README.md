@@ -121,7 +121,7 @@ Install in your Splunk environment:
 ```bash
 # Copy to Splunk app directory
 sudo cp splunk-alerts.conf \
-  /opt/splunk/etc/apps/snow_owl_tftp/local/savedsearches.conf
+  /opt/splunk/etc/apps/usg_tftp/local/savedsearches.conf
 
 # Restart Splunk
 sudo /opt/splunk/bin/splunk restart
@@ -429,7 +429,7 @@ These dashboards and alerts satisfy requirements from:
 
 For issues or enhancement requests:
 - GitHub Issues: https://github.com/Wing/Snow-Owl/issues
-- Documentation: https://github.com/Wing/Snow-Owl/tree/main/crates/snow-owl-tftp
+- Documentation: https://github.com/Wing/Snow-Owl/tree/main/crates/usg-tftp
 
 When reporting issues, include:
 - Platform version (Kibana/Grafana/Prometheus/Splunk/Elasticsearch)

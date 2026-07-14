@@ -1,15 +1,17 @@
 // Snow-Owl TFTP Server Binary
 #![allow(dead_code)]
 
-use snow_owl_tftp::audit::AuditLogger;
-use snow_owl_tftp::buffer_pool::BufferPool;
-use snow_owl_tftp::config::{
-    self, default_multicast_addr_for_version, load_config, validate_config, write_config,
-    LogFormat, MulticastConfig, MulticastIpVersion, SocketConfig, TftpConfig, WriteConfig,
+use usg_tftp::audit::AuditLogger;
+use usg_tftp::buffer_pool::BufferPool;
+use usg_tftp::config::{
+    self, LogFormat, MulticastConfig, MulticastIpVersion, SocketConfig, TftpConfig, WriteConfig,
+    default_multicast_addr_for_version, load_config, validate_config, write_config,
 };
-use snow_owl_tftp::multicast::MulticastTftpServer;
-use snow_owl_tftp::worker_pool::WorkerPool;
-use snow_owl_tftp::{Result, TftpError, TransferMode, TftpOptions, MAX_BLOCK_SIZE, MAX_PACKET_SIZE, MAX_RETRIES};
+use usg_tftp::multicast::MulticastTftpServer;
+use usg_tftp::worker_pool::WorkerPool;
+use usg_tftp::{
+    MAX_BLOCK_SIZE, MAX_PACKET_SIZE, MAX_RETRIES, Result, TftpError, TftpOptions, TransferMode,
+};
 
 use bytes::{Buf, BufMut, BytesMut};
 use clap::Parser;
@@ -351,9 +353,12 @@ fn create_transfer_socket(bind_addr: SocketAddr) -> Result<UdpSocket> {
         .map_err(|e| TftpError::Tftp(format!("Failed to create transfer socket: {}", e)))?;
 
     // Bind the socket
-    socket
-        .bind(&bind_addr.into())
-        .map_err(|e| TftpError::Tftp(format!("Failed to bind transfer socket to {}: {}", bind_addr, e)))?;
+    socket.bind(&bind_addr.into()).map_err(|e| {
+        TftpError::Tftp(format!(
+            "Failed to bind transfer socket to {}: {}",
+            bind_addr, e
+        ))
+    })?;
 
     // Set non-blocking mode for tokio
     socket
@@ -369,7 +374,7 @@ fn create_transfer_socket(bind_addr: SocketAddr) -> Result<UdpSocket> {
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "snow-owl-tftp", about = "Standalone TFTP server")]
+#[command(name = "usg-tftp", about = "Standalone TFTP server")]
 struct Cli {
     /// Path to the TOML configuration file
     #[arg(long, default_value = "/etc/snow-owl/tftp.toml")]
@@ -469,7 +474,7 @@ enum TftpErrorCode {
 ///
 /// NIST Controls:
 /// - SI-10: Information Input Validation (mode validation)
-// TransferMode and TftpOptions are now imported from snow_owl_tftp library at the top of the file
+// TransferMode and TftpOptions are now imported from usg_tftp library at the top of the file
 
 pub struct TftpServer {
     root_dir: PathBuf,
@@ -963,9 +968,15 @@ impl TftpServer {
                         // Create a response socket for this client
                         // Use IPv6 unspecified if client is IPv6, IPv4 otherwise (dual-stack support)
                         let bind_addr = if client_addr.is_ipv6() {
-                            SocketAddr::new(std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0)
+                            SocketAddr::new(
+                                std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+                                0,
+                            )
                         } else {
-                            SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0)
+                            SocketAddr::new(
+                                std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                                0,
+                            )
                         };
                         let response_socket = Arc::new(create_transfer_socket(bind_addr)?);
                         response_socket.connect(client_addr).await?;
@@ -1748,7 +1759,8 @@ impl TftpServer {
                     if mode == TransferMode::Netascii {
                         netascii_buffer.clear();
                         netascii_buffer.extend_from_slice(
-                            TransferMode::convert_to_netascii(&read_buffer[..bytes_read]).as_slice(),
+                            TransferMode::convert_to_netascii(&read_buffer[..bytes_read])
+                                .as_slice(),
                         );
                         netascii_buffer.clone()
                     } else {

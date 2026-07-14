@@ -10,18 +10,18 @@
 ### Release Build
 
 ```bash
-cargo build --release -p snow-owl-tftp
+cargo build --release -p usg-tftp
 ```
 
 **Status:** ✅ Success
 **Build Time:** ~0.21s (incremental)
-**Binary Location:** `target/release/snow-owl-tftp`
+**Binary Location:** `target/release/usg-tftp`
 **Warnings:** 9 (all dead code warnings, expected)
 
 ### Test Suite
 
 ```bash
-cargo test -p snow-owl-tftp
+cargo test -p usg-tftp
 ```
 
 **Status:** ✅ All 14 tests passing
@@ -109,7 +109,7 @@ All warnings are for dead code that will be used in future features or is part o
 
 **Usage:**
 ```bash
-cd crates/snow-owl-tftp
+cd crates/usg-tftp
 sudo ./benchmark-phase2.sh
 ```
 
@@ -194,40 +194,40 @@ See: [examples/phase2-optimized.toml](examples/phase2-optimized.toml)
 
 ```bash
 # Build debug
-cargo build -p snow-owl-tftp
+cargo build -p usg-tftp
 
 # Run tests
-cargo test -p snow-owl-tftp
+cargo test -p usg-tftp
 
 # Run with config
-cargo run -p snow-owl-tftp -- -c config.toml
+cargo run -p usg-tftp -- -c config.toml
 ```
 
 ### Release
 
 ```bash
 # Build optimized binary
-cargo build --release -p snow-owl-tftp
+cargo build --release -p usg-tftp
 
 # Binary location
-./target/release/snow-owl-tftp
+./target/release/usg-tftp
 
 # Check version
-./target/release/snow-owl-tftp --version
+./target/release/usg-tftp --version
 ```
 
 ### Testing
 
 ```bash
 # Unit tests
-cargo test -p snow-owl-tftp
+cargo test -p usg-tftp
 
 # Integration tests (16 tests: 10 IPv4 + 6 IPv6)
-cd crates/snow-owl-tftp/tests
+cd crates/usg-tftp/tests
 ./integration-test.sh
 
 # Benchmarks
-cd crates/snow-owl-tftp
+cd crates/usg-tftp
 sudo ./benchmark-phase2.sh
 ```
 

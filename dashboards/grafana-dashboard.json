@@ -1329,7 +1329,7 @@
   },
   "timezone": "",
   "title": "Snow-Owl TFTP Performance Dashboard",
-  "uid": "snow-owl-tftp-perf",
+  "uid": "usg-tftp-perf",
   "version": 1,
   "weekStart": ""
 }

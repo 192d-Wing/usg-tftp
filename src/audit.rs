@@ -313,7 +313,7 @@ impl CommonFields {
                 .ok()
                 .and_then(|h| h.into_string().ok())
                 .unwrap_or_else(|| "unknown".to_string()),
-            service: "snow-owl-tftp".to_string(),
+            service: "usg-tftp".to_string(),
             severity: severity.to_string(),
             correlation_id: None,
         }

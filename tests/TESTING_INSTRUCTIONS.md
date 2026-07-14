@@ -34,10 +34,10 @@ python3 --version
 cd /home/jwillman/projects/snow-owl
 
 # Build the server
-cargo build --release --bin snow-owl-tftp-server
+cargo build --release --bin usg-tftp-server
 
 # Verify binary exists
-ls -lh target/release/snow-owl-tftp-server
+ls -lh target/release/usg-tftp-server
 ```
 
 ## Running the Tests
@@ -45,7 +45,7 @@ ls -lh target/release/snow-owl-tftp-server
 ### Option 1: Run All Tests (Recommended)
 
 ```bash
-cd /home/jwillman/projects/snow-owl/crates/snow-owl-tftp
+cd /home/jwillman/projects/snow-owl/crates/usg-tftp
 ./tests/run-all-tests.sh
 ```
 
@@ -59,7 +59,7 @@ This will:
 ### Option 2: Run Only Windowsize Tests
 
 ```bash
-cd /home/jwillman/projects/snow-owl/crates/snow-owl-tftp
+cd /home/jwillman/projects/snow-owl/crates/usg-tftp
 ./tests/windowsize-test.sh
 ```
 
@@ -96,7 +96,7 @@ All tests passed!
 ### Option 3: Python Performance Analyzer
 
 ```bash
-cd /home/jwillman/projects/snow-owl/crates/snow-owl-tftp
+cd /home/jwillman/projects/snow-owl/crates/usg-tftp
 
 # Quick test (windowsize 1-8 with medium file)
 ./tests/windowsize-analyzer.py quick

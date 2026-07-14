@@ -81,7 +81,7 @@ filebeat.inputs:
   # Add custom fields
   fields:
     log_type: tftp_audit
-    application: snow-owl-tftp
+    application: usg-tftp
     environment: production
   fields_under_root: true
 

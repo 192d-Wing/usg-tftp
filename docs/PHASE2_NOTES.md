@@ -161,7 +161,7 @@ The batch operations (sendmmsg/recvmmsg) implemented in Phase 2 provide the opti
 
    ```bash
    # Concurrent transfers (10 clients)
-   strace -c ./snow-owl-tftp  # Measure syscall reduction
+   strace -c ./usg-tftp  # Measure syscall reduction
 
    # Expected: 60-80% fewer sendto/recvfrom calls
    ```

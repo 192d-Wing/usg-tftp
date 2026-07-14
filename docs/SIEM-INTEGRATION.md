@@ -29,7 +29,7 @@ sudo chmod 750 /var/log/snow-owl
 ### 2. Initialize Configuration
 
 ```bash
-snow-owl-tftp --init-config --config /etc/snow-owl/tftp.toml
+usg-tftp --init-config --config /etc/snow-owl/tftp.toml
 ```
 
 ### 3. Start Server
@@ -47,7 +47,7 @@ The server will automatically log all audit events to `/var/log/snow-owl/tftp-au
   "event_type": "server_started",
   "timestamp": "2026-01-18T10:00:00.000Z",
   "hostname": "tftp-01",
-  "service": "snow-owl-tftp",
+  "service": "usg-tftp",
   "severity": "info",
   "bind_addr": "0.0.0.0:69",
   "root_dir": "/var/lib/snow-owl/tftp",
@@ -64,7 +64,7 @@ The server will automatically log all audit events to `/var/log/snow-owl/tftp-au
   "event_type": "read_request",
   "timestamp": "2026-01-18T10:05:23.456Z",
   "hostname": "tftp-01",
-  "service": "snow-owl-tftp",
+  "service": "usg-tftp",
   "severity": "info",
   "client_addr": "192.168.1.100:54321",
   "filename": "firmware.bin",
@@ -80,7 +80,7 @@ The server will automatically log all audit events to `/var/log/snow-owl/tftp-au
   "event_type": "transfer_completed",
   "timestamp": "2026-01-18T10:05:25.789Z",
   "hostname": "tftp-01",
-  "service": "snow-owl-tftp",
+  "service": "usg-tftp",
   "severity": "info",
   "client_addr": "192.168.1.100:54321",
   "filename": "firmware.bin",
@@ -108,7 +108,7 @@ The server will automatically log all audit events to `/var/log/snow-owl/tftp-au
   "event_type": "path_traversal_attempt",
   "timestamp": "2026-01-18T10:10:00.000Z",
   "hostname": "tftp-01",
-  "service": "snow-owl-tftp",
+  "service": "usg-tftp",
   "severity": "error",
   "client_addr": "192.168.1.200:12345",
   "requested_path": "../../etc/passwd",
@@ -123,7 +123,7 @@ The server will automatically log all audit events to `/var/log/snow-owl/tftp-au
   "event_type": "file_size_limit_exceeded",
   "timestamp": "2026-01-18T10:15:00.000Z",
   "hostname": "tftp-01",
-  "service": "snow-owl-tftp",
+  "service": "usg-tftp",
   "severity": "error",
   "client_addr": "192.168.1.100:54321",
   "filename": "large_file.bin",
@@ -141,7 +141,7 @@ The server will automatically log all audit events to `/var/log/snow-owl/tftp-au
   "event_type": "multicast_session_created",
   "timestamp": "2026-01-18T10:20:00.000Z",
   "hostname": "tftp-01",
-  "service": "snow-owl-tftp",
+  "service": "usg-tftp",
   "severity": "info",
   "session_id": "550e8400-e29b-41d4-a716-446655440000",
   "filename": "os-image.bin",
@@ -174,7 +174,7 @@ filebeat.inputs:
   json.keys_under_root: true
   json.add_error_key: true
   fields:
-    application: snow-owl-tftp
+    application: usg-tftp
     environment: production
 
 output.splunk:
@@ -240,7 +240,7 @@ index=security-audit event_type="transfer_completed"
 
 #### Logstash Configuration
 
-Create `/etc/logstash/conf.d/snow-owl-tftp.conf`:
+Create `/etc/logstash/conf.d/usg-tftp.conf`:
 
 ```ruby
 input {
@@ -305,7 +305,7 @@ Edit `/etc/datadog-agent/conf.d/tftp.d/conf.yaml`:
 logs:
   - type: file
     path: /var/log/snow-owl/tftp-audit.json
-    service: snow-owl-tftp
+    service: usg-tftp
     source: tftp
     sourcecategory: security
     tags:
@@ -324,27 +324,27 @@ sudo systemctl restart datadog-agent
 **Security events facet:**
 
 ```text
-service:snow-owl-tftp severity:error
+service:usg-tftp severity:error
 ```
 
 **File transfer metrics:**
 
 ```text
-service:snow-owl-tftp event_type:transfer_completed
+service:usg-tftp event_type:transfer_completed
 @avg:duration_ms by @filename
 ```
 
 **Transfer performance monitoring:**
 
 ```text
-service:snow-owl-tftp event_type:transfer_completed
+service:usg-tftp event_type:transfer_completed
 @avg:throughput_bps by @filename
 ```
 
 **Slow transfer detection (< 100 KB/s):**
 
 ```text
-service:snow-owl-tftp event_type:transfer_completed throughput_bps:<102400
+service:usg-tftp event_type:transfer_completed throughput_bps:<102400
 ```
 
 ### AWS CloudWatch
@@ -422,7 +422,7 @@ Create `/etc/fluent/fluent.conf`:
 <filter tftp.audit>
   @type record_transformer
   <record>
-    application "snow-owl-tftp"
+    application "usg-tftp"
     environment "production"
   </record>
 </filter>
@@ -446,7 +446,7 @@ Create `/etc/fluent/fluent.conf`:
 
 ### Using logrotate
 
-Create `/etc/logrotate.d/snow-owl-tftp`:
+Create `/etc/logrotate.d/usg-tftp`:
 
 ```text
 /var/log/snow-owl/tftp-audit.json {
@@ -458,7 +458,7 @@ Create `/etc/logrotate.d/snow-owl-tftp`:
     missingok
     create 0640 snow-owl snow-owl
     postrotate
-        systemctl reload snow-owl-tftp
+        systemctl reload usg-tftp
     endscript
 }
 ```
@@ -571,7 +571,7 @@ ls -ld /var/log/snow-owl
 1. Check server logs:
 
 ```bash
-journalctl -u snow-owl-tftp -n 50
+journalctl -u usg-tftp -n 50
 ```
 
 ### Log File Not Created
@@ -654,8 +654,8 @@ nc -zv siem.example.com 514
 
 For issues or questions about SIEM integration:
 
-- GitHub Issues: <https://github.com/Wing/Snow-Owl/issues>
-- Documentation: <https://github.com/Wing/Snow-Owl/tree/main/crates/snow-owl-tftp>
+- GitHub Issues: <https://github.com/192d-Wing/usg-tftp/issues>
+- Documentation: <https://github.com/192d-Wing/usg-tftp/tree/main/crates/usg-tftp>
 
 ---
 

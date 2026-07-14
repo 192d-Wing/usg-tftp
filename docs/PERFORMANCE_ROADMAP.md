@@ -1,4 +1,4 @@
-# Performance Enhancements Roadmap for snow-owl-tftp
+# Performance Enhancements Roadmap for usg-tftp
 
 ## Linux/BSD Systems Optimization Plan
 
@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-This roadmap outlines platform-specific performance optimizations for the snow-owl-tftp server targeting Linux and BSD systems. Optimizations are prioritized by impact vs. effort and organized into phases for systematic implementation.
+This roadmap outlines platform-specific performance optimizations for the usg-tftp server targeting Linux and BSD systems. Optimizations are prioritized by impact vs. effort and organized into phases for systematic implementation.
 
 **Expected Overall Performance Gains:**
 
@@ -236,7 +236,7 @@ pub struct BatchConfig {
 **Testing:**
 
 - Run concurrent transfer test with 10+ clients
-- Measure syscall count with strace: `strace -c ./snow-owl-tftp`
+- Measure syscall count with strace: `strace -c ./usg-tftp`
 - Benchmark before/after throughput
 
 ---
@@ -1267,7 +1267,7 @@ max_batch_size = 64
 ```bash
 # Disable optimizations via config
 sed -i 's/use_sendfile = true/use_sendfile = false/' tftp.toml
-systemctl reload snow-owl-tftp
+systemctl reload usg-tftp
 ```
 
 ---

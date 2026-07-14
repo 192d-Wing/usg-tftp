@@ -77,7 +77,7 @@ printf "Unix\nLine\nEndings\n" > /tmp/tftp-test/root/unix-lines.txt
 cargo build --release --manifest-path /path/to/Snow-Owl/Cargo.toml
 
 # Run server (in separate terminal)
-/path/to/Snow-Owl/target/release/snow-owl-tftp --config /tmp/tftp-test/tftp.toml
+/path/to/Snow-Owl/target/release/usg-tftp --config /tmp/tftp-test/tftp.toml
 ```
 
 ## RFC Compliance Tests
@@ -768,7 +768,7 @@ on:
   push:
     branches: [ main ]
     paths:
-      - 'crates/snow-owl-tftp/**'
+      - 'crates/usg-tftp/**'
   pull_request:
     branches: [ main ]
 
@@ -791,7 +791,7 @@ jobs:
         sudo apt-get install -y tftp-hpa atftp
 
     - name: Build server
-      run: cargo build --release --manifest-path crates/snow-owl-tftp/Cargo.toml
+      run: cargo build --release --manifest-path crates/usg-tftp/Cargo.toml
 
     - name: Setup test environment
       run: |
@@ -801,11 +801,11 @@ jobs:
 
     - name: Run server
       run: |
-        ./target/release/snow-owl-tftp --config crates/snow-owl-tftp/docs/test-config.toml &
+        ./target/release/usg-tftp --config crates/usg-tftp/docs/test-config.toml &
         sleep 2
 
     - name: Run integration tests
-      run: ./crates/snow-owl-tftp/docs/integration-test.sh
+      run: ./crates/usg-tftp/docs/integration-test.sh
 
     - name: Upload test results
       if: always()
@@ -823,7 +823,7 @@ jobs:
 
 ```bash
 # Check if server is running
-ps aux | grep snow-owl-tftp
+ps aux | grep usg-tftp
 
 # Check port binding
 sudo netstat -ulnp | grep 6969

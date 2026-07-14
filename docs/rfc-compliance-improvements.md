@@ -41,6 +41,7 @@ if negotiated_options.contains_key("tsize") {
 ```
 
 **Benefits:**
+
 - Clients receive accurate transfer size for progress tracking
 - Complies with RFC 2349 section 3 (Transfer Size Option)
 - Prevents client-side validation errors
@@ -71,6 +72,7 @@ if let Some(expected_size) = options.transfer_size {
 ```
 
 **Benefits:**
+
 - Detects incomplete or truncated transfers
 - Logs size mismatches for debugging
 - Complies with RFC 2349 section 3
@@ -87,6 +89,7 @@ RFC 1350 section 4 states: "If the reply is an acknowledgment of a duplicate pac
 ### Solution
 
 Implemented a new `wait_for_ack_with_duplicate_handling()` function that distinguishes between:
+
 - **Correct ACK** (block number matches) → Continue to next block
 - **Duplicate ACK** (block number is previous) → Retransmit current block
 - **Invalid ACK** (other block numbers) → Error
@@ -115,6 +118,7 @@ loop {
 ```
 
 **Benefits:**
+
 - Handles packet reordering gracefully
 - Improves reliability on lossy networks
 - Strictly complies with RFC 1350 section 4
@@ -150,6 +154,7 @@ Err(_) => {
 ```
 
 **Benefits:**
+
 - Clients are notified immediately when transfers time out
 - Prevents clients from waiting indefinitely
 - Improves user experience with clear error messages
@@ -168,6 +173,7 @@ RFC 2347 section 3 states: "An option is acknowledged by simply including it in 
 The server now explicitly validates all option values and logs warnings when invalid values are received:
 
 **Block Size (RFC 2348):**
+
 ```rust
 "blksize" => {
     // RFC 2348 - Block Size Option (valid range: 8-65464 bytes)
@@ -194,6 +200,7 @@ The server now explicitly validates all option values and logs warnings when inv
 ```
 
 **Timeout (RFC 2349):**
+
 ```rust
 "timeout" => {
     // RFC 2349 - Timeout Interval Option (valid range: 1-255 seconds)
@@ -219,6 +226,7 @@ The server now explicitly validates all option values and logs warnings when inv
 ```
 
 **Transfer Size (RFC 2349):**
+
 ```rust
 "tsize" => {
     // RFC 2349 - Transfer Size Option
@@ -238,6 +246,7 @@ The server now explicitly validates all option values and logs warnings when inv
 ```
 
 **Benefits:**
+
 - Invalid option values are logged with clear warnings
 - Options with invalid values are omitted from OACK (RFC 2347 compliant)
 - Server falls back to default values gracefully
@@ -245,6 +254,7 @@ The server now explicitly validates all option values and logs warnings when inv
 - Improves interoperability with diverse TFTP clients
 
 **Location:**
+
 - RRQ option negotiation: [src/main.rs:421-495](../src/main.rs#L421-L495)
 - WRQ option negotiation: [src/main.rs:634-712](../src/main.rs#L634-L712)
 
@@ -300,6 +310,7 @@ After these improvements, the Snow-Owl TFTP server is fully compliant with:
 All RFC compliance improvements generate appropriate audit events:
 
 **Option Negotiation Warnings:**
+
 ```json
 {
   "level": "warn",
@@ -309,6 +320,7 @@ All RFC compliance improvements generate appropriate audit events:
 ```
 
 **Transfer Size Mismatches:**
+
 ```json
 {
   "level": "warn",
@@ -318,6 +330,7 @@ All RFC compliance improvements generate appropriate audit events:
 ```
 
 **Duplicate ACK Detection:**
+
 ```json
 {
   "level": "debug",
@@ -340,6 +353,7 @@ While the server is now RFC compliant for core TFTP operations, potential future
 ## Support
 
 For issues or questions about RFC compliance:
-- Open an issue: [GitHub Issues](https://github.com/Wing/Snow-Owl/issues)
+
+- Open an issue: [GitHub Issues](https://github.com/192d-Wing/usg-tftp/issues)
 - Review test results: `cargo test`
 - Check audit logs: `/var/log/snow-owl/tftp-audit.json`

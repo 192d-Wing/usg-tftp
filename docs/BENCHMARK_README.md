@@ -2,7 +2,7 @@
 
 ## Overview
 
-The `benchmark-phase2.sh` script provides comprehensive performance testing for Phase 2 batch operations (recvmmsg/sendmmsg) in the snow-owl-tftp server.
+The `benchmark-phase2.sh` script provides comprehensive performance testing for Phase 2 batch operations (recvmmsg/sendmmsg) in the usg-tftp server.
 
 ## Quick Start
 
@@ -10,7 +10,7 @@ The `benchmark-phase2.sh` script provides comprehensive performance testing for 
 
 ```bash
 # From container
-cd /path/to/Snow-Owl/crates/snow-owl-tftp
+cd /path/to/Snow-Owl/crates/usg-tftp
 sudo ./benchmark-phase2.sh
 ```
 
@@ -186,7 +186,7 @@ source $HOME/.cargo/env
 
 **Check:**
 1. Firewall rules allow UDP port 6969
-2. Server is actually running: `ps aux | grep snow-owl-tftp`
+2. Server is actually running: `ps aux | grep usg-tftp`
 3. Increase timeout or reduce file sizes
 
 ## Integration with CI/CD
@@ -209,13 +209,13 @@ jobs:
           sudo apt-get install -y tftp strace bc
       - name: Run benchmark
         run: |
-          cd crates/snow-owl-tftp
+          cd crates/usg-tftp
           sudo ./benchmark-phase2.sh
       - name: Upload results
         uses: actions/upload-artifact@v3
         with:
           name: benchmark-results
-          path: crates/snow-owl-tftp/benchmark-test/results/
+          path: crates/usg-tftp/benchmark-test/results/
 ```
 
 ## Next Steps After Benchmarking

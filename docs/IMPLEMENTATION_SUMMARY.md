@@ -10,7 +10,7 @@
 
 ## Executive Summary
 
-This document summarizes the implementation of platform-specific performance optimizations for the snow-owl-tftp server targeting Linux and BSD systems. The work has been organized into phases, with Phases 1 and 2 now complete.
+This document summarizes the implementation of platform-specific performance optimizations for the usg-tftp server targeting Linux and BSD systems. The work has been organized into phases, with Phases 1 and 2 now complete.
 
 ### Overall Progress
 
@@ -252,7 +252,7 @@ msg_zerocopy_threshold_bytes = 8192
 
 ```bash
 # Use existing integration test
-./crates/snow-owl-tftp/tests/integration-test.sh
+./crates/usg-tftp/tests/integration-test.sh
 
 # Test with 10+ concurrent clients (lines 354-387)
 # Measure:
@@ -269,13 +269,13 @@ msg_zerocopy_threshold_bytes = 8192
 enable_recvmmsg = false
 
 # Run with strace to count syscalls
-strace -c ./target/release/snow-owl-tftp -c config.toml
+strace -c ./target/release/usg-tftp -c config.toml
 
 # Enable batch operations
 enable_recvmmsg = true
 
 # Run again and compare
-strace -c ./target/release/snow-owl-tftp -c config.toml
+strace -c ./target/release/usg-tftp -c config.toml
 
 # Expected: 60-80% reduction in recvfrom/sendto calls
 ```

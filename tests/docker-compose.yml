@@ -4,16 +4,16 @@ services:
   tftp-tests:
     build:
       context: ../../..
-      dockerfile: crates/snow-owl-tftp/tests/Dockerfile.integration
-    container_name: snow-owl-tftp-tests
+      dockerfile: crates/usg-tftp/tests/Dockerfile.integration
+    container_name: usg-tftp-tests
     # Show test output
     tty: true
     stdin_open: true
   tftp-benchmarks:
     build:
       context: ../../..
-      dockerfile: crates/snow-owl-tftp/tests/Dockerfile.bench
-    container_name: snow-owl-tftp-benchmarks
+      dockerfile: crates/usg-tftp/tests/Dockerfile.bench
+    container_name: usg-tftp-benchmarks
     # Show test output
     tty: true
     stdin_open: true

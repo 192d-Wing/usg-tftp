@@ -100,7 +100,7 @@ EOF
 echo "IPv6 test content" > /tmp/testfile.txt
 
 # Start server with IPv6 dual-stack
-./target/release/snow-owl-tftp-server --config /tmp/tftp-ipv6.toml &
+./target/release/usg-tftp-server --config /tmp/tftp-ipv6.toml &
 SERVER_PID=$!
 sleep 2
 

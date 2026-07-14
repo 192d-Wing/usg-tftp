@@ -10,7 +10,7 @@ Run the complete test suite including integration and windowsize tests:
 
 ```bash
 # Build and run all tests
-cd crates/snow-owl-tftp
+cd crates/usg-tftp
 cargo build --release
 ./tests/run-all-tests.sh
 ```
@@ -20,7 +20,7 @@ cargo build --release
 Run tests in a consistent Linux environment using Docker:
 
 ```bash
-cd crates/snow-owl-tftp/tests
+cd crates/usg-tftp/tests
 ./run-docker-tests.sh
 ```
 
@@ -269,20 +269,20 @@ If you prefer manual control:
 
 ```bash
 # Build the image
-docker build -t snow-owl-tftp-test -f Dockerfile ../../..
+docker build -t usg-tftp-test -f Dockerfile ../../..
 
 # Run tests
-docker run --rm snow-owl-tftp-test
+docker run --rm usg-tftp-test
 
 # Run with interactive shell (for debugging)
-docker run --rm -it snow-owl-tftp-test /bin/bash
+docker run --rm -it usg-tftp-test /bin/bash
 ```
 
 ## Troubleshooting
 
 ### Docker: Image build fails
 
-- Ensure you're in the correct directory: `crates/snow-owl-tftp/tests`
+- Ensure you're in the correct directory: `crates/usg-tftp/tests`
 - Check Docker has enough disk space: `docker system df`
 - Try cleaning Docker cache: `docker system prune -a`
 

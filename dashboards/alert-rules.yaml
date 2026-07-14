@@ -24,7 +24,7 @@ groups:
           summary: "Path traversal attack detected"
           description: "Client {{ $labels.client_addr }} attempted path traversal with pattern {{ $labels.requested_path }}"
           action: "Block source IP immediately and investigate"
-          runbook_url: "https://github.com/Wing/Snow-Owl/wiki/security-incidents#path-traversal"
+          runbook_url: "https://github.com/192d-Wing/usg-tftp/wiki/security-incidents#path-traversal"
 
       # Symlink access attempts indicate reconnaissance
       - alert: TFTPSymlinkAccessAttempt

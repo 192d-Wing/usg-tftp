@@ -157,16 +157,16 @@ Build and test with:
 
 ```bash
 # Build in release mode
-cargo build --release --package snow-owl-tftp
+cargo build --release --package usg-tftp
 
 # Run server
-./target/release/snow-owl-tftp --root-dir ./test-files --bind 127.0.0.1:6969
+./target/release/usg-tftp --root-dir ./test-files --bind 127.0.0.1:6969
 
 # Test transfer (in another terminal)
 time curl -s tftp://127.0.0.1:6969/100MB.bin > /dev/null
 
 # Monitor memory usage
-watch -n 1 'ps aux | grep snow-owl-tftp | grep -v grep'
+watch -n 1 'ps aux | grep usg-tftp | grep -v grep'
 ```
 
 ## Migration Notes

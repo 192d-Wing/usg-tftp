@@ -190,17 +190,17 @@ build_project() {
     export PATH="$HOME/.cargo/bin:$PATH"
 
     # Navigate to project root (from tests directory)
-    cd ../../..
+    cd ..
 
     # Build release binaries (TFTP package only to avoid SFTP dependency issues)
-    if cargo build --release -p snow-owl-tftp 2>&1; then
+    if cargo build --release -p usg-tftp 2>&1; then
         BUILD_EXIT=$?
     else
         BUILD_EXIT=$?
     fi
 
     # Return to tests directory
-    cd crates/snow-owl-tftp/tests
+    cd tests
 
     if [ $BUILD_EXIT -ne 0 ]; then
         echo ""

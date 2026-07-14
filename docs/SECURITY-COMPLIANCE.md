@@ -84,7 +84,7 @@ All events include:
 
 - ISO 8601 timestamp
 - Hostname/system identifier
-- Service name (snow-owl-tftp)
+- Service name (usg-tftp)
 - Severity level (info, warn, error)
 - Client address and port
 - Detailed contextual information
@@ -133,7 +133,7 @@ Event-specific audit data:
   "event_type": "read_request",
   "timestamp": "2026-01-18T10:30:45.123Z",
   "hostname": "tftp-server-01",
-  "service": "snow-owl-tftp",
+  "service": "usg-tftp",
   "severity": "info",
   "client_addr": "192.168.1.100:54321",
   "filename": "firmware.bin",

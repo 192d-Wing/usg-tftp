@@ -347,7 +347,7 @@ fn create_optimized_socket(bind_addr: SocketAddr, config: &SocketConfig) -> Resu
 }
 
 #[derive(Parser, Debug)]
-#[command(name = "snow-owl-tftp", about = "Standalone TFTP server")]
+#[command(name = "usg-tftp", about = "Standalone TFTP server")]
 struct Cli {
     /// Path to the TOML configuration file
     #[arg(long, default_value = "/etc/snow-owl/tftp.toml")]
@@ -1083,9 +1083,15 @@ impl TftpServer {
                         // Create a response socket for this client
                         // Use IPv6 unspecified if client is IPv6, IPv4 otherwise (dual-stack support)
                         let bind_addr = if client_addr.is_ipv6() {
-                            SocketAddr::new(std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED), 0)
+                            SocketAddr::new(
+                                std::net::IpAddr::V6(std::net::Ipv6Addr::UNSPECIFIED),
+                                0,
+                            )
                         } else {
-                            SocketAddr::new(std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED), 0)
+                            SocketAddr::new(
+                                std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+                                0,
+                            )
                         };
                         let response_socket = Arc::new(UdpSocket::bind(bind_addr).await?);
                         response_socket.connect(client_addr).await?;

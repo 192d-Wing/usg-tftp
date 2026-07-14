@@ -3,22 +3,22 @@
 ## Files Changed
 
 ### Code Files (.rs) - Ready to Commit
-- `crates/snow-owl-tftp/src/main.rs` - RFC 7440 windowsize config integration + recvmmsg() fixes
-- `crates/snow-owl-tftp/src/config.rs` - No changes (already had default_windowsize)
+- `crates/usg-tftp/src/main.rs` - RFC 7440 windowsize config integration + recvmmsg() fixes
+- `crates/usg-tftp/src/config.rs` - No changes (already had default_windowsize)
 
 ### Documentation Files (.md) - Separate commit
-- `crates/snow-owl-tftp/tests/PERFORMANCE_OPTIMIZATION_PLAN.md` - Updated with completion status
-- `crates/snow-owl-tftp/tests/RFC7440_IMPLEMENTATION_SUMMARY.md` - New comprehensive guide
-- `crates/snow-owl-tftp/tests/FINAL_RESULTS.md` - Already created
-- `crates/snow-owl-tftp/tests/SESSION_SUMMARY.md` - Already created
-- `crates/snow-owl-tftp/tests/DEBUG_RECVMMSG.md` - Already created
-- `crates/snow-owl-tftp/tests/BENCHMARK_RESULTS.md` - Already created
+- `crates/usg-tftp/tests/PERFORMANCE_OPTIMIZATION_PLAN.md` - Updated with completion status
+- `crates/usg-tftp/tests/RFC7440_IMPLEMENTATION_SUMMARY.md` - New comprehensive guide
+- `crates/usg-tftp/tests/FINAL_RESULTS.md` - Already created
+- `crates/usg-tftp/tests/SESSION_SUMMARY.md` - Already created
+- `crates/usg-tftp/tests/DEBUG_RECVMMSG.md` - Already created
+- `crates/usg-tftp/tests/BENCHMARK_RESULTS.md` - Already created
 
 ## Commit Command for .rs Files
 
 ```bash
 # Stage only the .rs files
-git add crates/snow-owl-tftp/src/main.rs
+git add crates/usg-tftp/src/main.rs
 
 # Commit with detailed message
 git commit -m "$(cat <<'EOF'
@@ -105,10 +105,10 @@ adaptive_batch_threshold = 0
 
 ```bash
 # Build with changes
-cargo build --release --package snow-owl-tftp
+cargo build --release --package usg-tftp
 
 # Run with windowsize config
-./target/release/snow-owl-tftp --config config-with-windowsize.toml
+./target/release/usg-tftp --config config-with-windowsize.toml
 
 # Benchmark (if available)
 sudo ./tests/benchmark-phase2.sh

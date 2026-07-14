@@ -272,11 +272,11 @@ Monitor memory usage during transfers:
 
 ```bash
 # Watch memory usage in real-time
-watch -n 1 'ps aux | grep snow-owl-tftp | grep -v grep'
+watch -n 1 'ps aux | grep usg-tftp | grep -v grep'
 
 # Monitor with detailed metrics
 cargo build --release && \
-  /usr/bin/time -l ./target/release/snow-owl-tftp \
+  /usr/bin/time -l ./target/release/usg-tftp \
     --root-dir ./test-files \
     --bind 127.0.0.1:6969
 ```

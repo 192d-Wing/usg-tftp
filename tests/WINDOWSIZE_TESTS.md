@@ -23,7 +23,7 @@ brew install atftp
 **Usage:**
 ```bash
 # Run all 32 tests
-cd crates/snow-owl-tftp
+cd crates/usg-tftp
 cargo build --release
 ./tests/windowsize-test.sh
 ```
