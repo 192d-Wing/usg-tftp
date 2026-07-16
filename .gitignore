@@ -1,3 +1,5 @@
 /target/
 *.log
 *.tftp-tmp
+web/node_modules/
+web/dist/

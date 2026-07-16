@@ -42,6 +42,9 @@ pub struct TftpConfig {
     /// Maximum file size in bytes that can be served (default: 100MB)
     /// Set to 0 for unlimited (not recommended for security)
     pub max_file_size_bytes: u64,
+    /// Web UI configuration
+    #[serde(default)]
+    pub web: WebConfig,
 }
 
 impl Default for TftpConfig {
@@ -54,6 +57,55 @@ impl Default for TftpConfig {
             write_config: WriteConfig::default(),
             performance: PerformanceConfig::default(),
             max_file_size_bytes: 104_857_600, // 100 MB default
+            web: WebConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct WebConfig {
+    pub bind_addr: SocketAddr,
+    pub max_upload_bytes: u64,
+    pub cors_enabled: bool,
+    pub tls: TlsConfig,
+}
+
+impl Default for WebConfig {
+    fn default() -> Self {
+        Self {
+            bind_addr: SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 443),
+            max_upload_bytes: 524_288_000, // 500 MB
+            cors_enabled: false,
+            tls: TlsConfig::default(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(default)]
+pub struct TlsConfig {
+    pub acme_enabled: bool,
+    pub acme_domain: String,
+    pub acme_email: String,
+    pub acme_directory_url: String,
+    pub acme_cache_dir: String,
+    pub acme_staging: bool,
+    pub cert_path: String,
+    pub key_path: String,
+}
+
+impl Default for TlsConfig {
+    fn default() -> Self {
+        Self {
+            acme_enabled: false,
+            acme_domain: String::new(),
+            acme_email: String::new(),
+            acme_directory_url: String::new(),
+            acme_cache_dir: "/var/lib/usg-tftp/acme".to_string(),
+            acme_staging: false,
+            cert_path: String::new(),
+            key_path: String::new(),
         }
     }
 }

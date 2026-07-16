@@ -1,0 +1,107 @@
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use axum::Router;
+use tokio::net::TcpListener;
+use tracing::info;
+
+use crate::config::TlsConfig;
+
+pub async fn serve_https(
+    app: Router,
+    bind_addr: SocketAddr,
+    tls_config: &TlsConfig,
+) -> anyhow::Result<()> {
+    if !tls_config.cert_path.is_empty() && !tls_config.key_path.is_empty() {
+        serve_manual_tls(app, bind_addr, tls_config).await
+    } else if tls_config.acme_enabled {
+        serve_acme_tls(app, bind_addr, tls_config).await
+    } else {
+        info!("TLS disabled, serving HTTP on {}", bind_addr);
+        let listener = TcpListener::bind(bind_addr).await?;
+        axum::serve(listener, app).await?;
+        Ok(())
+    }
+}
+
+async fn serve_manual_tls(
+    app: Router,
+    bind_addr: SocketAddr,
+    tls_config: &TlsConfig,
+) -> anyhow::Result<()> {
+    info!("Starting HTTPS with manual certificates on {}", bind_addr);
+
+    let rustls_config = axum_server::tls_rustls::RustlsConfig::from_pem_file(
+        PathBuf::from(&tls_config.cert_path),
+        PathBuf::from(&tls_config.key_path),
+    )
+    .await?;
+
+    axum_server::bind_rustls(bind_addr, rustls_config)
+        .serve(app.into_make_service())
+        .await?;
+
+    Ok(())
+}
+
+async fn serve_acme_tls(
+    app: Router,
+    bind_addr: SocketAddr,
+    tls_config: &TlsConfig,
+) -> anyhow::Result<()> {
+    use rustls_acme::AcmeConfig;
+    use rustls_acme::caches::DirCache;
+
+    let domain = &tls_config.acme_domain;
+    if domain.is_empty() {
+        anyhow::bail!("ACME enabled but no domain configured (web.tls.acme_domain)");
+    }
+
+    info!(
+        domain = %domain,
+        "Starting HTTPS with ACME on {}",
+        bind_addr
+    );
+
+    let cache_dir = if tls_config.acme_cache_dir.is_empty() {
+        "/var/lib/usg-tftp/acme".to_string()
+    } else {
+        tls_config.acme_cache_dir.clone()
+    };
+
+    let mut acme_config = AcmeConfig::new([domain.as_str()])
+        .cache(DirCache::new(cache_dir))
+        .directory_lets_encrypt(tls_config.acme_staging);
+
+    if !tls_config.acme_email.is_empty() {
+        acme_config = acme_config.contact([format!("mailto:{}", tls_config.acme_email)]);
+    }
+
+    if !tls_config.acme_directory_url.is_empty() {
+        acme_config = acme_config.directory(tls_config.acme_directory_url.clone());
+    }
+
+    let mut acme_state = acme_config.state();
+    let acceptor = acme_state.axum_acceptor(acme_state.default_rustls_config());
+
+    tokio::spawn(async move {
+        loop {
+            match acme_state.next().await {
+                Some(Ok(ok)) => tracing::info!("ACME event: {:?}", ok),
+                Some(Err(err)) => tracing::error!("ACME error: {:?}", err),
+                None => break,
+            }
+        }
+    });
+
+    let listener = TcpListener::bind(bind_addr).await?;
+    info!("ACME HTTPS listener ready on {}", bind_addr);
+
+    axum_server::from_tcp(listener.into_std()?)
+        .acceptor(acceptor)
+        .serve(app.into_make_service())
+        .await?;
+
+    Ok(())
+}

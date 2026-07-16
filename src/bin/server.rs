@@ -3,6 +3,7 @@
 
 use usg_tftp::audit::AuditLogger;
 use usg_tftp::buffer_pool::BufferPool;
+use usg_tftp::path_security::validate_and_resolve_path;
 use usg_tftp::config::{
     self, LogFormat, MulticastConfig, MulticastIpVersion, SocketConfig, TftpConfig, WriteConfig,
     default_multicast_addr_for_version, load_config, validate_config, write_config,
@@ -1008,7 +1009,7 @@ impl TftpServer {
                 }
 
                 // Validate filename (prevent directory traversal)
-                let file_path = match Self::validate_and_resolve_path(&root_dir, &filename) {
+                let file_path = match validate_and_resolve_path(&root_dir, &filename) {
                     Ok(path) => path,
                     Err(e) => {
                         // Audit log: Path validation failure
@@ -1248,7 +1249,7 @@ impl TftpServer {
                 }
 
                 // Validate filename (prevent directory traversal)
-                let file_path = match Self::validate_and_resolve_path(&root_dir, &filename) {
+                let file_path = match validate_and_resolve_path(&root_dir, &filename) {
                     Ok(path) => path,
                     Err(e) => {
                         // Audit log: Path validation failure
@@ -2522,75 +2523,6 @@ impl TftpServer {
         // STIG V-222577: Input validation for character encoding
         String::from_utf8(string_bytes.to_vec())
             .map_err(|e| TftpError::Tftp(format!("Invalid UTF-8: {}", e)))
-    }
-
-    /// Validate and resolve file paths to prevent directory traversal attacks
-    ///
-    /// NIST 800-53 Controls:
-    /// - AC-3: Access Enforcement (restrict access to authorized paths)
-    /// - SI-10: Information Input Validation (validate filename format)
-    /// - SC-7(12): Host-Based Boundary Protection (filesystem boundary enforcement)
-    /// - CM-7: Least Functionality (read-only access, no writes)
-    /// - AC-6: Least Privilege (restrict file access to designated directories)
-    ///
-    /// STIG V-222602: Applications must enforce access restrictions
-    /// STIG V-222603: Applications must protect against directory traversal
-    /// STIG V-222604: Applications must validate file paths
-    /// STIG V-222611: Applications must prevent unauthorized file access
-    /// STIG V-222612: Applications must implement path canonicalization
-    fn validate_and_resolve_path(root_dir: &Path, filename: &str) -> Result<PathBuf> {
-        // NIST SI-10: Normalize the filename and check for directory traversal
-        // STIG V-222603: Prevent path traversal attacks (.., ./, etc.)
-        let filename = filename.replace('\\', "/");
-        if filename.contains("..") {
-            return Err(TftpError::Tftp("Invalid filename".to_string()));
-        }
-
-        // NIST AC-3: Join with root directory to enforce base path
-        // STIG V-222611: Restrict file access to authorized directory
-        let file_path = root_dir.join(filename.trim_start_matches('/'));
-
-        // Security: Detect and reject symlinks to prevent TOCTOU attacks
-        // NIST AC-3: Additional access control check
-        // STIG V-222604: Validate file type and reject symbolic links
-        match std::fs::symlink_metadata(&file_path) {
-            Ok(metadata) => {
-                if metadata.file_type().is_symlink() {
-                    return Err(TftpError::Tftp("Symlinks are not allowed".to_string()));
-                }
-            }
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
-                // File doesn't exist - this is OK, will fail later at open
-            }
-            Err(_) => {
-                return Err(TftpError::Tftp("Access denied".to_string()));
-            }
-        }
-
-        // NIST AC-3: Ensure the resolved path is within root_dir
-        // NIST SC-7(12): Enforce filesystem boundary protection
-        // STIG V-222612: Path canonicalization for security validation
-        let canonical_root = root_dir
-            .canonicalize()
-            .map_err(|_| TftpError::Tftp("Root directory error".to_string()))?;
-
-        // Always perform boundary check, even if file doesn't exist yet
-        // NIST AC-6: Least privilege - ensure access only within bounds
-        if let Ok(canonical_file) = file_path.canonicalize() {
-            if !canonical_file.starts_with(&canonical_root) {
-                return Err(TftpError::Tftp("Access denied".to_string()));
-            }
-        } else {
-            // File doesn't exist yet - check that the parent is within bounds
-            if let Some(parent) = file_path.parent()
-                && let Ok(canonical_parent) = parent.canonicalize()
-                && !canonical_parent.starts_with(&canonical_root)
-            {
-                return Err(TftpError::Tftp("Access denied".to_string()));
-            }
-        }
-
-        Ok(file_path)
     }
 
     // RFC 1350: Send ERROR packet

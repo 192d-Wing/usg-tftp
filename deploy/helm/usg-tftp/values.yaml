@@ -460,3 +460,84 @@ extraVolumeMounts: []
 #     - name: RUST_LOG
 #       value: "debug"
 extraEnv: []
+
+# ---------------------------------------------------------------------------
+# Web UI (separate deployment for TFTP file management)
+# ---------------------------------------------------------------------------
+webUI:
+  # -- Enable the web UI deployment. When enabled, a separate Deployment and
+  # Service are created. The web UI shares the TFTP root directory via a
+  # ReadWriteMany PVC.
+  enabled: false
+
+  # -- Number of web UI replicas.
+  replicaCount: 1
+
+  image:
+    # -- Web UI container image.
+    repository: ghcr.io/192d-wing/usg-tftp-webui
+
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+
+    # -- Image tag. Defaults to the chart's appVersion if left empty.
+    tag: ""
+
+  service:
+    # -- Service type for the web UI.
+    type: ClusterIP
+
+    # -- HTTPS port for the web UI.
+    port: 443
+
+    # -- HTTP port (used for ACME challenges and HTTP→HTTPS redirect).
+    httpPort: 80
+
+    # -- Node port (only used when service.type is "NodePort").
+    nodePort: null
+
+    # -- Annotations on the web UI Service.
+    annotations: {}
+
+  # -- TLS configuration for the web UI.
+  tls:
+    # -- Enable ACME (Let's Encrypt) automatic certificate provisioning.
+    acmeEnabled: false
+
+    # -- Domain name for the ACME certificate (required when acmeEnabled is true).
+    acmeDomain: ""
+
+    # -- Contact email for Let's Encrypt notifications.
+    acmeEmail: ""
+
+    # -- ACME directory URL. Default is Let's Encrypt production.
+    # Use "https://acme-staging-v02.api.letsencrypt.org/directory" for testing.
+    acmeDirectoryUrl: ""
+
+    # -- Use ACME staging environment (for testing without rate limits).
+    acmeStaging: false
+
+    # -- Path to a manually-provided TLS certificate (PEM).
+    # Use for air-gapped environments without ACME.
+    certPath: ""
+
+    # -- Path to the TLS private key (PEM).
+    keyPath: ""
+
+  # -- Maximum upload size in bytes (default: 500 MB).
+  maxUploadBytes: 524288000
+
+  # -- Enable CORS headers on the API.
+  corsEnabled: false
+
+  # -- CPU and memory resources for the web UI container.
+  resources: {}
+
+  # -- Node selector for the web UI pods.
+  nodeSelector: {}
+
+  # -- Tolerations for the web UI pods.
+  tolerations: []
+
+  # -- Affinity rules for the web UI pods.
+  affinity: {}

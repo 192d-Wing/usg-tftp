@@ -7,7 +7,11 @@ pub mod buffer_pool;
 pub mod config;
 pub mod error;
 pub mod multicast;
+pub mod path_security;
 pub mod worker_pool;
+
+#[cfg(feature = "webui")]
+pub mod web;
 
 // Server module stub (to be properly implemented)
 pub mod server {
