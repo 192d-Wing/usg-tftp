@@ -161,11 +161,11 @@ pub async fn upload_files(
             }
         };
 
-        if let Some(parent) = dest.parent() {
-            if let Err(e) = fs::create_dir_all(parent).await {
-                errors.push(format!("{}: {}", relative, e));
-                continue;
-            }
+        if let Some(parent) = dest.parent()
+            && let Err(e) = fs::create_dir_all(parent).await
+        {
+            errors.push(format!("{}: {}", relative, e));
+            continue;
         }
 
         let data = match field.bytes().await {
