@@ -1,6 +1,5 @@
 use std::net::SocketAddr;
 use std::path::PathBuf;
-use std::sync::Arc;
 
 use axum::Router;
 use tokio::net::TcpListener;
@@ -50,6 +49,7 @@ async fn serve_acme_tls(
     bind_addr: SocketAddr,
     tls_config: &TlsConfig,
 ) -> anyhow::Result<()> {
+    use futures_lite::StreamExt;
     use rustls_acme::AcmeConfig;
     use rustls_acme::caches::DirCache;
 
@@ -83,23 +83,21 @@ async fn serve_acme_tls(
     }
 
     let mut acme_state = acme_config.state();
-    let acceptor = acme_state.axum_acceptor(acme_state.default_rustls_config());
+    let server_config = acme_state.default_rustls_config();
 
     tokio::spawn(async move {
-        loop {
-            match acme_state.next().await {
-                Some(Ok(ok)) => tracing::info!("ACME event: {:?}", ok),
-                Some(Err(err)) => tracing::error!("ACME error: {:?}", err),
-                None => break,
+        while let Some(event) = acme_state.next().await {
+            match event {
+                Ok(ok) => tracing::info!("ACME event: {:?}", ok),
+                Err(err) => tracing::error!("ACME error: {:?}", err),
             }
         }
     });
 
-    let listener = TcpListener::bind(bind_addr).await?;
     info!("ACME HTTPS listener ready on {}", bind_addr);
 
-    axum_server::from_tcp(listener.into_std()?)
-        .acceptor(acceptor)
+    let axum_tls_config = axum_server::tls_rustls::RustlsConfig::from_config(server_config);
+    axum_server::bind_rustls(bind_addr, axum_tls_config)
         .serve(app.into_make_service())
         .await?;
 
