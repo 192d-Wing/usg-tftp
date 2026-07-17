@@ -278,11 +278,7 @@ impl WorkerPool {
         for stats in &self.worker_stats {
             let processed = stats.packets_processed.load(Ordering::Relaxed);
             let total_time = stats.total_processing_time_us.load(Ordering::Relaxed);
-            let avg_time = if processed > 0 {
-                total_time / processed
-            } else {
-                0
-            };
+            let avg_time = total_time.checked_div(processed).unwrap_or(0);
 
             info!(
                 "Worker {}: processed={}, avg_time={}us, errors={}",
