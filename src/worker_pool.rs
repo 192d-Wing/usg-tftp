@@ -569,6 +569,7 @@ async fn sender_thread(
 }
 
 /// Worker thread: Process TFTP packets from master and send responses to sender
+#[allow(clippy::too_many_arguments)]
 async fn worker_thread(
     worker_id: usize,
     mut rx: mpsc::Receiver<IncomingPacket>,
@@ -629,6 +630,7 @@ async fn worker_thread(
 /// The worker pool architecture is most beneficial for the initial packet processing
 /// and distributing load across cores. Once a transfer is established, the existing
 /// single-threaded async architecture is efficient for that session.
+#[allow(clippy::too_many_arguments)]
 async fn process_tftp_packet(
     packet: IncomingPacket,
     tx: &mpsc::Sender<OutgoingPacket>,

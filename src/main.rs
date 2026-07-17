@@ -179,12 +179,10 @@ fn batch_recv_packets(
                 if let Some(addr_storage) = msg.address {
                     // Convert SockaddrStorage to SocketAddr
                     if let Some(sock_addr) = addr_storage.as_sockaddr_in() {
-                        let addr =
-                            SocketAddr::new(IpAddr::V4(sock_addr.ip().into()), sock_addr.port());
+                        let addr = SocketAddr::new(IpAddr::V4(sock_addr.ip()), sock_addr.port());
                         results.push((msg.bytes, addr));
                     } else if let Some(sock_addr) = addr_storage.as_sockaddr_in6() {
-                        let addr =
-                            SocketAddr::new(IpAddr::V6(sock_addr.ip().into()), sock_addr.port());
+                        let addr = SocketAddr::new(IpAddr::V6(sock_addr.ip()), sock_addr.port());
                         results.push((msg.bytes, addr));
                     }
                 }
@@ -234,7 +232,7 @@ fn batch_send_packets(socket: &UdpSocket, packets: &[(Vec<u8>, SocketAddr)]) -> 
         &mut headers,
         iovecs.iter(),
         &addrs,
-        &cmsgs,
+        cmsgs,
         MsgFlags::empty(),
     ) {
         Ok(results) => {
