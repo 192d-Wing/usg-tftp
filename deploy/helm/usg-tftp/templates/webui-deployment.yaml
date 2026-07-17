@@ -40,6 +40,12 @@ spec:
               containerPort: 80
               protocol: TCP
           {{- $tlsEnabled := or (and .Values.webUI.tls.certPath (ne .Values.webUI.tls.certPath "")) .Values.webUI.tls.acmeEnabled }}
+          startupProbe:
+            tcpSocket:
+              port: {{ if $tlsEnabled }}https{{ else }}http{{ end }}
+            initialDelaySeconds: 2
+            periodSeconds: 5
+            failureThreshold: 30
           livenessProbe:
             httpGet:
               path: /api/status
@@ -48,11 +54,8 @@ spec:
             initialDelaySeconds: 10
             periodSeconds: 30
           readinessProbe:
-            httpGet:
-              path: /api/status
+            tcpSocket:
               port: {{ if $tlsEnabled }}https{{ else }}http{{ end }}
-              scheme: {{ if $tlsEnabled }}HTTPS{{ else }}HTTP{{ end }}
-            initialDelaySeconds: 5
             periodSeconds: 10
           securityContext:
             readOnlyRootFilesystem: true
