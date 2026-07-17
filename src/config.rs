@@ -91,6 +91,7 @@ pub struct TlsConfig {
     pub acme_directory_url: String,
     pub acme_cache_dir: String,
     pub acme_staging: bool,
+    pub acme_ca_cert_path: String,
     pub cert_path: String,
     pub key_path: String,
 }
@@ -104,6 +105,7 @@ impl Default for TlsConfig {
             acme_directory_url: String::new(),
             acme_cache_dir: "/var/lib/usg-tftp/acme".to_string(),
             acme_staging: false,
+            acme_ca_cert_path: String::new(),
             cert_path: String::new(),
             key_path: String::new(),
         }

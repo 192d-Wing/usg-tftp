@@ -74,6 +74,28 @@ async fn serve_acme_tls(
         .cache(DirCache::new(cache_dir))
         .directory_lets_encrypt(!tls_config.acme_staging);
 
+    if !tls_config.acme_ca_cert_path.is_empty() {
+        let ca_pem = std::fs::read(&tls_config.acme_ca_cert_path).map_err(|e| {
+            anyhow::anyhow!(
+                "Failed to read ACME CA cert {}: {}",
+                tls_config.acme_ca_cert_path,
+                e
+            )
+        })?;
+        let mut root_store = rustls::RootCertStore::empty();
+        for cert in rustls_pemfile::certs(&mut &ca_pem[..]) {
+            root_store.add(cert?)?;
+        }
+        let client_config = rustls::ClientConfig::builder()
+            .with_root_certificates(root_store)
+            .with_no_client_auth();
+        acme_config = acme_config.client_tls_config(std::sync::Arc::new(client_config));
+        info!(
+            "Loaded custom CA for ACME from {}",
+            tls_config.acme_ca_cert_path
+        );
+    }
+
     if !tls_config.acme_email.is_empty() {
         acme_config = acme_config.contact([format!("mailto:{}", tls_config.acme_email)]);
     }

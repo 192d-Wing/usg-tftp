@@ -89,6 +89,9 @@ data:
     acme_directory_url = {{ .Values.webUI.tls.acmeDirectoryUrl | quote }}
     acme_cache_dir = "/var/lib/usg-tftp/acme"
     acme_staging = {{ .Values.webUI.tls.acmeStaging }}
+    {{- if .Values.webUI.tls.acmeCACert }}
+    acme_ca_cert_path = "/etc/usg-tftp/acme-ca/ca.crt"
+    {{- end }}
     cert_path = {{ .Values.webUI.tls.certPath | quote }}
     key_path = {{ .Values.webUI.tls.keyPath | quote }}
     {{- end }}

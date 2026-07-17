@@ -77,12 +77,22 @@ spec:
               mountPath: {{ .Values.config.rootDir }}
             - name: acme-cache
               mountPath: /var/lib/usg-tftp/acme
+            {{- if .Values.webUI.tls.acmeCACert }}
+            - name: acme-ca
+              mountPath: /etc/usg-tftp/acme-ca
+              readOnly: true
+            {{- end }}
             - name: tmp
               mountPath: /tmp
       volumes:
         - name: config
           configMap:
             name: {{ include "usg-tftp.fullname" . }}-config
+        {{- if .Values.webUI.tls.acmeCACert }}
+        - name: acme-ca
+          secret:
+            secretName: {{ include "usg-tftp.fullname" . }}-acme-ca
+        {{- end }}
         - name: data
           {{- if .Values.persistence.enabled }}
           persistentVolumeClaim:

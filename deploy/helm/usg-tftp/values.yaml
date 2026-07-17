@@ -534,6 +534,11 @@ webUI:
     # -- Use ACME staging environment (for testing without rate limits).
     acmeStaging: false
 
+    # -- Base64-encoded PEM CA certificate for the ACME directory server.
+    # Required when acmeDirectoryUrl points to an internal CA whose
+    # certificate is not in the default trust store.
+    acmeCACert: ""
+
     # -- Path to a manually-provided TLS certificate (PEM).
     # Use for air-gapped environments without ACME.
     certPath: ""

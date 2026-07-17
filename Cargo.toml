@@ -59,10 +59,12 @@ tower-http = { version = "0.6", features = ["cors", "trace"], optional = true }
 rust-embed = { version = "8", features = ["compression"], optional = true }
 mime_guess = { version = "2", optional = true }
 rustls-acme = { version = "0.15", optional = true }
+rustls = { version = "0.23", optional = true }
+rustls-pemfile = { version = "2", optional = true }
 futures-lite = { version = "2", optional = true }
 tower = { version = "0.5", optional = true }
 http = { version = "1", optional = true }
 
 [features]
 default = []
-webui = ["axum", "axum-server", "tower-http", "rust-embed", "mime_guess", "rustls-acme", "futures-lite", "tower", "http"]
+webui = ["axum", "axum-server", "tower-http", "rust-embed", "mime_guess", "rustls-acme", "rustls", "rustls-pemfile", "futures-lite", "tower", "http"]
