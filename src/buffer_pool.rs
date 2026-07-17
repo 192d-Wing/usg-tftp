@@ -89,7 +89,7 @@ impl PooledBuffer {
         }
     }
 
-    pub fn as_ref(&self) -> &[u8] {
+    pub fn as_bytes(&self) -> &[u8] {
         self.buffer.as_ref().unwrap().as_ref()
     }
 

@@ -321,11 +321,7 @@ fn print_stats_impl(
     for stats in worker_stats {
         let processed = stats.packets_processed.load(Ordering::Relaxed);
         let total_time = stats.total_processing_time_us.load(Ordering::Relaxed);
-        let avg_time = if processed > 0 {
-            total_time / processed
-        } else {
-            0
-        };
+        let avg_time = total_time.checked_div(processed).unwrap_or(0);
 
         info!(
             "Worker {}: processed={}, avg_time={}us, errors={}",
@@ -778,40 +774,36 @@ async fn handle_read_request_worker(
     for (name, value) in &requested_options {
         match name.as_str() {
             "blksize" => {
-                if let Ok(size) = value.parse::<usize>() {
-                    if (8..=crate::MAX_BLOCK_SIZE).contains(&size) {
-                        options.block_size = size;
-                        negotiated_options.insert("blksize".to_string(), size.to_string());
-                    }
+                if let Ok(size) = value.parse::<usize>()
+                    && (8..=crate::MAX_BLOCK_SIZE).contains(&size)
+                {
+                    options.block_size = size;
+                    negotiated_options.insert("blksize".to_string(), size.to_string());
                 }
             }
             "timeout" => {
-                if let Ok(t) = value.parse::<u64>() {
-                    if (1..=255).contains(&t) {
-                        options.timeout = t;
-                        negotiated_options.insert("timeout".to_string(), t.to_string());
-                    }
+                if let Ok(t) = value.parse::<u64>()
+                    && (1..=255).contains(&t)
+                {
+                    options.timeout = t;
+                    negotiated_options.insert("timeout".to_string(), t.to_string());
                 }
             }
             "tsize" => {
-                // For RRQ, server responds with actual file size
                 negotiated_options.insert("tsize".to_string(), "0".to_string());
             }
             "windowsize" => {
-                if let Ok(w) = value.parse::<usize>() {
-                    if (1..=65535).contains(&w) {
-                        options.windowsize = w;
-                        negotiated_options.insert("windowsize".to_string(), w.to_string());
-                    }
+                if let Ok(w) = value.parse::<usize>()
+                    && (1..=65535).contains(&w)
+                {
+                    options.windowsize = w;
+                    negotiated_options.insert("windowsize".to_string(), w.to_string());
                 }
             }
-            _ => {
-                // Unknown option - ignore per RFC 2347
-            }
+            _ => {}
         }
     }
 
-    // Clone config for spawned task (required for 'static lifetime)
     let file_io_config = config.performance.platform.file_io.clone();
 
     // Spawn transfer task using existing handle_read_request
@@ -888,36 +880,33 @@ async fn handle_write_request_worker(
     for (name, value) in &requested_options {
         match name.as_str() {
             "blksize" => {
-                if let Ok(size) = value.parse::<usize>() {
-                    if (8..=crate::MAX_BLOCK_SIZE).contains(&size) {
-                        options.block_size = size;
-                        negotiated_options.insert("blksize".to_string(), size.to_string());
-                    }
+                if let Ok(size) = value.parse::<usize>()
+                    && (8..=crate::MAX_BLOCK_SIZE).contains(&size)
+                {
+                    options.block_size = size;
+                    negotiated_options.insert("blksize".to_string(), size.to_string());
                 }
             }
             "timeout" => {
-                if let Ok(t) = value.parse::<u64>() {
-                    if (1..=255).contains(&t) {
-                        options.timeout = t;
-                        negotiated_options.insert("timeout".to_string(), t.to_string());
-                    }
+                if let Ok(t) = value.parse::<u64>()
+                    && (1..=255).contains(&t)
+                {
+                    options.timeout = t;
+                    negotiated_options.insert("timeout".to_string(), t.to_string());
                 }
             }
             "tsize" => {
-                // For WRQ, acknowledge the transfer size
                 negotiated_options.insert("tsize".to_string(), value.clone());
             }
             "windowsize" => {
-                if let Ok(w) = value.parse::<usize>() {
-                    if (1..=65535).contains(&w) {
-                        options.windowsize = w;
-                        negotiated_options.insert("windowsize".to_string(), w.to_string());
-                    }
+                if let Ok(w) = value.parse::<usize>()
+                    && (1..=65535).contains(&w)
+                {
+                    options.windowsize = w;
+                    negotiated_options.insert("windowsize".to_string(), w.to_string());
                 }
             }
-            _ => {
-                // Unknown option - ignore per RFC 2347
-            }
+            _ => {}
         }
     }
 
@@ -1077,13 +1066,13 @@ async fn batch_send_packets_internal(
 /// Helper: Convert SockaddrStorage to std::net::SocketAddr
 #[cfg(any(target_os = "linux", target_os = "freebsd"))]
 fn sockaddr_to_std(addr_storage: &SockaddrStorage) -> Result<SocketAddr> {
-    use std::net::{IpAddr, Ipv4Addr, Ipv6Addr};
+    use std::net::IpAddr;
 
     if let Some(sock_addr) = addr_storage.as_sockaddr_in() {
-        let addr = SocketAddr::new(IpAddr::V4(Ipv4Addr::from(sock_addr.ip())), sock_addr.port());
+        let addr = SocketAddr::new(IpAddr::V4(sock_addr.ip()), sock_addr.port());
         Ok(addr)
     } else if let Some(sock_addr) = addr_storage.as_sockaddr_in6() {
-        let addr = SocketAddr::new(IpAddr::V6(Ipv6Addr::from(sock_addr.ip())), sock_addr.port());
+        let addr = SocketAddr::new(IpAddr::V6(sock_addr.ip()), sock_addr.port());
         Ok(addr)
     } else {
         Err(TftpError::Tftp("Unsupported address family".into()))

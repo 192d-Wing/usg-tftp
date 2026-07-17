@@ -1,5 +1,6 @@
 // Allow unused code for items that are part of the public API or reserved for future use
 #![allow(dead_code)]
+#![allow(clippy::too_many_arguments)]
 
 // Public modules - shared between server and client
 pub mod audit;
@@ -141,6 +142,7 @@ pub enum TransferMode {
 }
 
 impl TransferMode {
+    #[allow(clippy::should_implement_trait)]
     pub fn from_str(s: &str) -> Result<Self> {
         match s.to_lowercase().as_str() {
             "netascii" => Ok(TransferMode::Netascii),

@@ -891,7 +891,7 @@ impl Default for WorkerPoolConfig {
     fn default() -> Self {
         // Auto-detect CPU count, reserve 2 for master/sender
         let cpu_count = num_cpus::get();
-        let worker_count = (cpu_count.saturating_sub(2)).max(1).min(8);
+        let worker_count = cpu_count.saturating_sub(2).clamp(1, 8);
 
         Self {
             enabled: false, // Opt-in for Phase 4
