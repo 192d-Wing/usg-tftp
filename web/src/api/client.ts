@@ -12,9 +12,12 @@ async function handleResponse<T>(res: Response): Promise<T> {
   return res.json();
 }
 
-export async function listFiles(path: string): Promise<FileEntry[]> {
+export async function listFiles(
+  path: string,
+  signal?: AbortSignal,
+): Promise<FileEntry[]> {
   const params = path ? `?path=${encodeURIComponent(path)}` : "";
-  const res = await fetch(`${BASE}/api/files${params}`);
+  const res = await fetch(`${BASE}/api/files${params}`, { signal });
   return handleResponse<FileEntry[]>(res);
 }
 
@@ -48,17 +51,24 @@ export async function uploadFiles(
     : "";
 
   const sendOne = async (item: FileWithPath) => {
-    const form = new FormData();
-    form.append("file", item.file, item.relativePath);
-    const res = await fetch(`${BASE}/api/files/upload${params}`, {
-      method: "POST",
-      body: form,
-    });
-    const result = await handleResponse<UploadResult>(res);
-    allUploaded.push(...result.uploaded);
-    allErrors.push(...result.errors);
-    completed++;
-    onProgress?.(completed, items.length);
+    try {
+      const form = new FormData();
+      form.append("file", item.file, item.relativePath);
+      const res = await fetch(`${BASE}/api/files/upload${params}`, {
+        method: "POST",
+        body: form,
+      });
+      const result = await handleResponse<UploadResult>(res);
+      allUploaded.push(...result.uploaded);
+      allErrors.push(...result.errors);
+    } catch (e) {
+      allErrors.push(
+        `${item.relativePath}: ${e instanceof Error ? e.message : "failed"}`,
+      );
+    } finally {
+      completed++;
+      onProgress?.(completed, items.length);
+    }
   };
 
   for (let i = 0; i < items.length; i += concurrency) {

@@ -25,8 +25,15 @@ export default function CreateFolderModal({
   const [creating, setCreating] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  const nameError =
+    folderName.trim().startsWith(".")
+      ? "Folder names starting with '.' are hidden and won't appear in the listing"
+      : folderName.includes("/") || folderName.includes("\\")
+        ? "Folder name cannot contain path separators"
+        : null;
+
   const handleCreate = useCallback(async () => {
-    if (!folderName.trim()) return;
+    if (!folderName.trim() || nameError) return;
     setCreating(true);
     setError(null);
     const fullPath = currentPath
@@ -63,7 +70,7 @@ export default function CreateFolderModal({
             <Button
               variant="primary"
               loading={creating}
-              disabled={!folderName.trim()}
+              disabled={!folderName.trim() || !!nameError}
               onClick={handleCreate}
             >
               Create
@@ -76,6 +83,7 @@ export default function CreateFolderModal({
         <FormField
           label="Folder name"
           description={`Will be created in /${currentPath || "(root)"}`}
+          errorText={folderName.trim() ? nameError : undefined}
         >
           <Input
             value={folderName}

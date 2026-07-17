@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import Table from "@cloudscape-design/components/table";
 import Header from "@cloudscape-design/components/header";
 import Button from "@cloudscape-design/components/button";
@@ -50,6 +50,10 @@ export default function FileBrowser({
 }: FileBrowserProps) {
   const [selectedItems, setSelectedItems] = useState<FileEntry[]>([]);
   const [previewItem, setPreviewItem] = useState<FileEntry | null>(null);
+
+  useEffect(() => {
+    setSelectedItems([]);
+  }, [files]);
 
   const breadcrumbs = [{ text: "Root", href: "" }];
   if (currentPath) {

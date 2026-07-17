@@ -131,6 +131,7 @@ export default function FileUpload({
 
   const handleDismiss = useCallback(() => {
     reset();
+    if (inputRef.current) inputRef.current.value = "";
     onDismiss();
   }, [reset, onDismiss]);
 
