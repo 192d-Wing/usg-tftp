@@ -12,8 +12,9 @@ import type { FileEntry } from "../api/types";
 import { downloadFile } from "../api/client";
 import FilePreview from "./FilePreview";
 
-function formatSize(bytes: number): string {
-  if (bytes === 0) return "—";
+function formatSize(bytes: number, isDir: boolean): string {
+  if (isDir) return "—";
+  if (bytes === 0) return "0 B";
   const units = ["B", "KB", "MB", "GB"];
   const i = Math.min(Math.floor(Math.log(bytes) / Math.log(1024)), units.length - 1);
   const value = bytes / Math.pow(1024, i);
@@ -163,7 +164,7 @@ export default function FileBrowser({
           {
             id: "size",
             header: "Size",
-            cell: (item) => formatSize(item.size),
+            cell: (item) => formatSize(item.size, item.is_dir),
             sortingField: "size",
             width: "15%",
           },

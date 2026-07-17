@@ -8,6 +8,8 @@ export function useFileBrowser() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
+  const currentPathRef = useRef(currentPath);
+  currentPathRef.current = currentPath;
 
   const fetchFiles = useCallback(async (path: string) => {
     abortRef.current?.abort();
@@ -42,8 +44,8 @@ export function useFileBrowser() {
   }, []);
 
   const refresh = useCallback(() => {
-    fetchFiles(currentPath);
-  }, [currentPath, fetchFiles]);
+    fetchFiles(currentPathRef.current);
+  }, [fetchFiles]);
 
   return { files, currentPath, loading, error, navigate, refresh };
 }

@@ -16,6 +16,16 @@ fn api_error(status: StatusCode, msg: impl Into<String>) -> Response {
     (status, Json(ApiError { error: msg.into() })).into_response()
 }
 
+fn require_write(state: &AppState) -> Result<(), Response> {
+    if !state.config.write_config.enabled {
+        return Err(api_error(
+            StatusCode::FORBIDDEN,
+            "Write operations are disabled",
+        ));
+    }
+    Ok(())
+}
+
 fn relative_path(root: &Path, full: &Path) -> String {
     full.strip_prefix(root)
         .map(|p| p.to_string_lossy().replace('\\', "/"))
@@ -136,6 +146,9 @@ pub async fn upload_files(
     Query(query): Query<FileQuery>,
     mut multipart: Multipart,
 ) -> Response {
+    if let Err(e) = require_write(&state) {
+        return e;
+    }
     let target_dir = query.path.as_deref().unwrap_or("");
     let root = &state.config.root_dir;
 
@@ -220,6 +233,9 @@ pub async fn delete_file(
     Query(query): Query<FileQuery>,
     headers: HeaderMap,
 ) -> Response {
+    if let Err(e) = require_write(&state) {
+        return e;
+    }
     let req_path = match query.path.as_deref() {
         Some(p) if !p.is_empty() => p,
         _ => return api_error(StatusCode::BAD_REQUEST, "path is required"),
@@ -271,6 +287,9 @@ pub async fn create_directory(
     State(state): State<AppState>,
     Query(query): Query<FileQuery>,
 ) -> Response {
+    if let Err(e) = require_write(&state) {
+        return e;
+    }
     let req_path = match query.path.as_deref() {
         Some(p) if !p.is_empty() => p,
         _ => return api_error(StatusCode::BAD_REQUEST, "path is required"),

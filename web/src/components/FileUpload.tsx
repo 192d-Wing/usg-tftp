@@ -76,8 +76,10 @@ export default function FileUpload({
     async (items: FileWithPath[]) => {
       if (items.length === 0) return;
       try {
-        await upload(items, currentPath);
-        onComplete();
+        const res = await upload(items, currentPath);
+        if (res.errors.length === 0) {
+          onComplete();
+        }
       } catch {
         // error is tracked in useUpload state
       }
@@ -130,10 +132,15 @@ export default function FileUpload({
   );
 
   const handleDismiss = useCallback(() => {
+    const hadUploads = result && result.uploaded.length > 0;
     reset();
     if (inputRef.current) inputRef.current.value = "";
-    onDismiss();
-  }, [reset, onDismiss]);
+    if (hadUploads) {
+      onComplete();
+    } else {
+      onDismiss();
+    }
+  }, [reset, result, onComplete, onDismiss]);
 
   return (
     <Modal

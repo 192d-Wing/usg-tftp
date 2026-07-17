@@ -1,4 +1,4 @@
-import { useState, useCallback } from "react";
+import { useState, useCallback, useEffect } from "react";
 import Modal from "@cloudscape-design/components/modal";
 import Button from "@cloudscape-design/components/button";
 import Box from "@cloudscape-design/components/box";
@@ -20,6 +20,10 @@ export default function DeleteModal({
 }: DeleteModalProps) {
   const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    setError(null);
+  }, [items]);
 
   const handleConfirm = useCallback(async () => {
     if (items.length === 0) return;
@@ -51,12 +55,12 @@ export default function DeleteModal({
   return (
     <Modal
       visible={items.length > 0}
-      onDismiss={onDismiss}
+      onDismiss={deleting ? undefined : onDismiss}
       header={items.length === 1 ? `Delete ${items[0].is_dir ? "folder" : "file"}` : `Delete ${items.length} items`}
       footer={
         <Box float="right">
           <SpaceBetween direction="horizontal" size="xs">
-            <Button variant="link" onClick={onDismiss}>
+            <Button variant="link" onClick={onDismiss} disabled={deleting}>
               Cancel
             </Button>
             <Button variant="primary" loading={deleting} onClick={handleConfirm}>

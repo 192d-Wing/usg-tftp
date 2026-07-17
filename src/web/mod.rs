@@ -20,11 +20,12 @@ pub struct AppState {
 }
 
 pub fn create_router(state: AppState) -> Router {
+    let max_upload = state.config.web.max_upload_bytes as usize;
     let cors_enabled = state.config.web.cors_enabled;
 
     let upload = Router::new()
         .route("/api/files/upload", post(handlers::upload_files))
-        .layer(DefaultBodyLimit::disable());
+        .layer(DefaultBodyLimit::max(max_upload));
 
     let api = Router::new()
         .route("/api/files", get(handlers::list_files))
