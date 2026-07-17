@@ -1,0 +1,21 @@
+{{- if and .Values.cilium.enabled .Values.cilium.lbIPPools }}
+{{- range .Values.cilium.lbIPPools }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumLoadBalancerIPPool
+metadata:
+  name: {{ .name }}
+  labels:
+    {{- include "usg-tftp.labels" $ | nindent 4 }}
+    {{- with .labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  blocks:
+    {{- toYaml .blocks | nindent 4 }}
+  {{- with .serviceSelector }}
+  serviceSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}
