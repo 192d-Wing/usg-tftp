@@ -32,7 +32,7 @@ interface FileBrowserProps {
   error: string | null;
   onNavigate: (path: string) => void;
   onUploadClick: () => void;
-  onDeleteClick: (file: FileEntry) => void;
+  onDeleteClick: (files: FileEntry[]) => void;
   onCreateFolderClick: () => void;
   onRefresh: () => void;
 }
@@ -118,11 +118,7 @@ export default function FileBrowser({
                 )}
                 {selectedItems.length > 0 && (
                   <Button
-                    onClick={() => {
-                      for (const item of selectedItems) {
-                        onDeleteClick(item);
-                      }
-                    }}
+                    onClick={() => onDeleteClick(selectedItems)}
                   >
                     Delete
                   </Button>

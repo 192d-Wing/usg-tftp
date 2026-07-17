@@ -12,7 +12,7 @@ export default function App() {
   const { files, currentPath, loading, error, navigate, refresh } =
     useFileBrowser();
   const [showUpload, setShowUpload] = useState(false);
-  const [deleteTarget, setDeleteTarget] = useState<FileEntry | null>(null);
+  const [deleteTargets, setDeleteTargets] = useState<FileEntry[]>([]);
   const [showCreateFolder, setShowCreateFolder] = useState(false);
 
   const handleUploadComplete = useCallback(() => {
@@ -21,7 +21,7 @@ export default function App() {
   }, [refresh]);
 
   const handleDeleteComplete = useCallback(() => {
-    setDeleteTarget(null);
+    setDeleteTargets([]);
     refresh();
   }, [refresh]);
 
@@ -40,7 +40,7 @@ export default function App() {
         error={error}
         onNavigate={navigate}
         onUploadClick={() => setShowUpload(true)}
-        onDeleteClick={setDeleteTarget}
+        onDeleteClick={setDeleteTargets}
         onCreateFolderClick={() => setShowCreateFolder(true)}
         onRefresh={refresh}
       />
@@ -51,8 +51,8 @@ export default function App() {
         onComplete={handleUploadComplete}
       />
       <DeleteModal
-        item={deleteTarget}
-        onDismiss={() => setDeleteTarget(null)}
+        items={deleteTargets}
+        onDismiss={() => setDeleteTargets([])}
         onConfirm={handleDeleteComplete}
       />
       <CreateFolderModal

@@ -28,22 +28,32 @@ export async function downloadFile(path: string): Promise<void> {
   a.remove();
 }
 
+export interface FileWithPath {
+  file: File;
+  relativePath: string;
+}
+
 export async function uploadFiles(
-  files: File[],
+  items: FileWithPath[],
   targetPath: string,
   onProgress?: (uploaded: number, total: number) => void,
 ): Promise<UploadResult> {
   const allUploaded: string[] = [];
   const allErrors: string[] = [];
-  const batchSize = 5;
+  const batchSize = 10;
+  const concurrency = 3;
+  let completed = 0;
 
-  for (let i = 0; i < files.length; i += batchSize) {
-    const batch = files.slice(i, i + batchSize);
+  const batches: FileWithPath[][] = [];
+  for (let i = 0; i < items.length; i += batchSize) {
+    batches.push(items.slice(i, i + batchSize));
+  }
+
+  const sendBatch = async (batch: FileWithPath[]) => {
     const form = new FormData();
-    for (const file of batch) {
-      form.append("file", file, file.webkitRelativePath || file.name);
+    for (const item of batch) {
+      form.append("file", item.file, item.relativePath);
     }
-
     const params = targetPath
       ? `?path=${encodeURIComponent(targetPath)}`
       : "";
@@ -51,11 +61,15 @@ export async function uploadFiles(
       method: "POST",
       body: form,
     });
-
     const result = await handleResponse<UploadResult>(res);
     allUploaded.push(...result.uploaded);
     allErrors.push(...result.errors);
-    onProgress?.(i + batch.length, files.length);
+    completed += batch.length;
+    onProgress?.(completed, items.length);
+  };
+
+  for (let i = 0; i < batches.length; i += concurrency) {
+    await Promise.all(batches.slice(i, i + concurrency).map(sendBatch));
   }
 
   return { uploaded: allUploaded, errors: allErrors };

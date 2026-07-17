@@ -15,22 +15,31 @@ interface FileUploadProps {
   onComplete: () => void;
 }
 
-function collectEntries(entry: FileSystemEntry): Promise<File[]> {
+interface FileWithPath {
+  file: File;
+  relativePath: string;
+}
+
+function collectEntries(entry: FileSystemEntry, basePath = ""): Promise<FileWithPath[]> {
   return new Promise((resolve) => {
     if (entry.isFile) {
-      (entry as FileSystemFileEntry).file((f) => resolve([f]));
+      (entry as FileSystemFileEntry).file((f) => {
+        const relativePath = basePath ? `${basePath}/${f.name}` : f.name;
+        resolve([{ file: f, relativePath }]);
+      });
     } else if (entry.isDirectory) {
       const reader = (entry as FileSystemDirectoryEntry).createReader();
-      const files: File[] = [];
+      const results: FileWithPath[] = [];
+      const dirPath = basePath ? `${basePath}/${entry.name}` : entry.name;
       const readBatch = () => {
         reader.readEntries(async (entries) => {
           if (entries.length === 0) {
-            resolve(files);
+            resolve(results);
             return;
           }
           for (const e of entries) {
-            const nested = await collectEntries(e);
-            files.push(...nested);
+            const nested = await collectEntries(e, dirPath);
+            results.push(...nested);
           }
           readBatch();
         });
@@ -53,11 +62,11 @@ export default function FileUpload({
   const dropRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const handleFiles = useCallback(
-    async (files: File[]) => {
-      if (files.length === 0) return;
+  const handleFilesWithPaths = useCallback(
+    async (items: FileWithPath[]) => {
+      if (items.length === 0) return;
       try {
-        await upload(files, currentPath);
+        await upload(items, currentPath);
         onComplete();
       } catch {
         // error is tracked in useUpload state
@@ -71,7 +80,7 @@ export default function FileUpload({
       e.preventDefault();
       e.stopPropagation();
       const items = e.dataTransfer.items;
-      const allFiles: File[] = [];
+      const allFiles: FileWithPath[] = [];
 
       for (let i = 0; i < items.length; i++) {
         const entry = items[i].webkitGetAsEntry?.();
@@ -80,23 +89,28 @@ export default function FileUpload({
           allFiles.push(...files);
         } else {
           const file = items[i].getAsFile();
-          if (file) allFiles.push(file);
+          if (file) allFiles.push({ file, relativePath: file.name });
         }
       }
 
-      handleFiles(allFiles);
+      handleFilesWithPaths(allFiles);
     },
-    [handleFiles],
+    [handleFilesWithPaths],
   );
 
   const handleInputChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>) => {
       const fileList = e.target.files;
       if (fileList) {
-        handleFiles(Array.from(fileList));
+        handleFilesWithPaths(
+          Array.from(fileList).map((f) => ({
+            file: f,
+            relativePath: f.webkitRelativePath || f.name,
+          })),
+        );
       }
     },
-    [handleFiles],
+    [handleFilesWithPaths],
   );
 
   const handleDismiss = useCallback(() => {

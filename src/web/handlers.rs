@@ -169,17 +169,26 @@ pub async fn upload_files(
             continue;
         }
 
-        let data = match field.bytes().await {
-            Ok(d) => d,
+        let tmp_name = format!(".tftp-tmp-{}", uuid::Uuid::new_v4());
+        let tmp_path = dest.with_file_name(&tmp_name);
+        let mut tmp_file = match fs::File::create(&tmp_path).await {
+            Ok(f) => f,
             Err(e) => {
                 errors.push(format!("{}: {}", relative, e));
                 continue;
             }
         };
 
-        let tmp_name = format!(".tftp-tmp-{}", uuid::Uuid::new_v4());
-        let tmp_path = dest.with_file_name(tmp_name);
-        if let Err(e) = fs::write(&tmp_path, &data).await {
+        let mut write_err = None;
+        while let Ok(Some(chunk)) = field.chunk().await {
+            if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut tmp_file, &chunk).await {
+                write_err = Some(e);
+                break;
+            }
+        }
+        drop(tmp_file);
+
+        if let Some(e) = write_err {
             errors.push(format!("{}: {}", relative, e));
             let _ = fs::remove_file(&tmp_path).await;
             continue;
@@ -191,7 +200,7 @@ pub async fn upload_files(
             continue;
         }
 
-        info!(path = %full_relative, size = data.len(), "Web UI file uploaded");
+        info!(path = %full_relative, "Web UI file uploaded");
         uploaded.push(full_relative);
     }
 

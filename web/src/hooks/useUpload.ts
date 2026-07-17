@@ -2,6 +2,11 @@ import { useState, useCallback } from "react";
 import { uploadFiles } from "../api/client";
 import type { UploadResult } from "../api/types";
 
+export interface FileWithPath {
+  file: File;
+  relativePath: string;
+}
+
 interface UploadState {
   uploading: boolean;
   progress: number;
@@ -19,17 +24,17 @@ export function useUpload() {
     error: null,
   });
 
-  const upload = useCallback(async (files: File[], targetPath: string) => {
+  const upload = useCallback(async (items: FileWithPath[], targetPath: string) => {
     setState({
       uploading: true,
       progress: 0,
-      total: files.length,
+      total: items.length,
       result: null,
       error: null,
     });
 
     try {
-      const result = await uploadFiles(files, targetPath, (uploaded, total) => {
+      const result = await uploadFiles(items, targetPath, (uploaded, total) => {
         setState((prev) => ({ ...prev, progress: uploaded, total }));
       });
       setState((prev) => ({ ...prev, uploading: false, result }));

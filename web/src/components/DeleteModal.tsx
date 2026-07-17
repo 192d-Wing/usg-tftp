@@ -8,13 +8,13 @@ import { deleteFile } from "../api/client";
 import type { FileEntry } from "../api/types";
 
 interface DeleteModalProps {
-  item: FileEntry | null;
+  items: FileEntry[];
   onDismiss: () => void;
   onConfirm: () => void;
 }
 
 export default function DeleteModal({
-  item,
+  items,
   onDismiss,
   onConfirm,
 }: DeleteModalProps) {
@@ -22,24 +22,37 @@ export default function DeleteModal({
   const [error, setError] = useState<string | null>(null);
 
   const handleConfirm = useCallback(async () => {
-    if (!item) return;
+    if (items.length === 0) return;
     setDeleting(true);
     setError(null);
     try {
-      await deleteFile(item.path);
-      onConfirm();
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Delete failed");
+      const errors: string[] = [];
+      await Promise.all(
+        items.map(async (item) => {
+          try {
+            await deleteFile(item.path);
+          } catch (e) {
+            errors.push(`${item.name}: ${e instanceof Error ? e.message : "failed"}`);
+          }
+        }),
+      );
+      if (errors.length > 0) {
+        setError(errors.join("; "));
+      } else {
+        onConfirm();
+      }
     } finally {
       setDeleting(false);
     }
-  }, [item, onConfirm]);
+  }, [items, onConfirm]);
+
+  const hasDirs = items.some((i) => i.is_dir);
 
   return (
     <Modal
-      visible={!!item}
+      visible={items.length > 0}
       onDismiss={onDismiss}
-      header={`Delete ${item?.is_dir ? "folder" : "file"}`}
+      header={items.length === 1 ? `Delete ${items[0].is_dir ? "folder" : "file"}` : `Delete ${items.length} items`}
       footer={
         <Box float="right">
           <SpaceBetween direction="horizontal" size="xs">
@@ -55,9 +68,23 @@ export default function DeleteModal({
     >
       <SpaceBetween size="m">
         <Box>
-          Are you sure you want to delete{" "}
-          <strong>{item?.name}</strong>?
-          {item?.is_dir && " This will delete all contents inside the folder."}
+          {items.length === 1 ? (
+            <>
+              Are you sure you want to delete{" "}
+              <strong>{items[0].name}</strong>?
+              {items[0].is_dir && " This will delete all contents inside the folder."}
+            </>
+          ) : (
+            <>
+              Are you sure you want to delete these {items.length} items?
+              {hasDirs && " Folders will have all their contents deleted."}
+              <ul style={{ margin: "8px 0 0", paddingLeft: "20px" }}>
+                {items.map((item) => (
+                  <li key={item.path}>{item.name}</li>
+                ))}
+              </ul>
+            </>
+          )}
         </Box>
         {error && <Alert type="error">{error}</Alert>}
       </SpaceBetween>
