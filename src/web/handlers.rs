@@ -142,7 +142,7 @@ pub async fn upload_files(
     let mut uploaded = Vec::new();
     let mut errors = Vec::new();
 
-    while let Ok(Some(field)) = multipart.next_field().await {
+    while let Ok(Some(mut field)) = multipart.next_field().await {
         let relative = field.file_name().map(|s| s.to_string()).unwrap_or_default();
         if relative.is_empty() {
             continue;
