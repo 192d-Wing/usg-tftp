@@ -516,6 +516,29 @@ webUI:
     # -- Annotations on the web UI Service.
     annotations: {}
 
+  # -- Ingress configuration for the web UI.
+  ingress:
+    # -- Enable Ingress for the web UI.
+    enabled: false
+
+    # -- Ingress class name (e.g. "traefik", "nginx").
+    className: ""
+
+    # -- Annotations on the Ingress resource.
+    # For Traefik TLS passthrough (when the pod handles TLS via ACME):
+    #   traefik.ingress.kubernetes.io/router.tls: "true"
+    #   traefik.ingress.kubernetes.io/router.tls.passthrough: "true"
+    annotations: {}
+
+    # -- Hostname for the Ingress rule.
+    host: ""
+
+    # -- TLS configuration for the Ingress.
+    tls: []
+    #  - secretName: webui-tls
+    #    hosts:
+    #      - tftp-admin.example.com
+
   # -- TLS configuration for the web UI.
   tls:
     # -- Enable ACME (Let's Encrypt) automatic certificate provisioning.
