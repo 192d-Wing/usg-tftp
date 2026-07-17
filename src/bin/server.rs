@@ -3,12 +3,12 @@
 
 use usg_tftp::audit::AuditLogger;
 use usg_tftp::buffer_pool::BufferPool;
-use usg_tftp::path_security::validate_and_resolve_path;
 use usg_tftp::config::{
     self, LogFormat, MulticastConfig, MulticastIpVersion, SocketConfig, TftpConfig, WriteConfig,
     default_multicast_addr_for_version, load_config, validate_config, write_config,
 };
 use usg_tftp::multicast::MulticastTftpServer;
+use usg_tftp::path_security::validate_and_resolve_path;
 use usg_tftp::worker_pool::WorkerPool;
 use usg_tftp::{
     MAX_BLOCK_SIZE, MAX_PACKET_SIZE, MAX_RETRIES, Result, TftpError, TftpOptions, TransferMode,
