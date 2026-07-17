@@ -21,28 +21,38 @@ interface FileWithPath {
 }
 
 function collectEntries(entry: FileSystemEntry, basePath = ""): Promise<FileWithPath[]> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
     if (entry.isFile) {
-      (entry as FileSystemFileEntry).file((f) => {
-        const relativePath = basePath ? `${basePath}/${f.name}` : f.name;
-        resolve([{ file: f, relativePath }]);
-      });
+      (entry as FileSystemFileEntry).file(
+        (f) => {
+          const relativePath = basePath ? `${basePath}/${f.name}` : f.name;
+          resolve([{ file: f, relativePath }]);
+        },
+        (err) => reject(err),
+      );
     } else if (entry.isDirectory) {
       const reader = (entry as FileSystemDirectoryEntry).createReader();
       const results: FileWithPath[] = [];
       const dirPath = basePath ? `${basePath}/${entry.name}` : entry.name;
       const readBatch = () => {
-        reader.readEntries(async (entries) => {
-          if (entries.length === 0) {
-            resolve(results);
-            return;
-          }
-          for (const e of entries) {
-            const nested = await collectEntries(e, dirPath);
-            results.push(...nested);
-          }
-          readBatch();
-        });
+        reader.readEntries(
+          async (entries) => {
+            try {
+              if (entries.length === 0) {
+                resolve(results);
+                return;
+              }
+              for (const e of entries) {
+                const nested = await collectEntries(e, dirPath);
+                results.push(...nested);
+              }
+              readBatch();
+            } catch (err) {
+              reject(err);
+            }
+          },
+          (err) => reject(err),
+        );
       };
       readBatch();
     } else {
@@ -80,17 +90,23 @@ export default function FileUpload({
       e.preventDefault();
       e.stopPropagation();
       const items = e.dataTransfer.items;
-      const allFiles: FileWithPath[] = [];
+      const entries: FileSystemEntry[] = [];
+      const plainFiles: FileWithPath[] = [];
 
       for (let i = 0; i < items.length; i++) {
         const entry = items[i].webkitGetAsEntry?.();
         if (entry) {
-          const files = await collectEntries(entry);
-          allFiles.push(...files);
+          entries.push(entry);
         } else {
           const file = items[i].getAsFile();
-          if (file) allFiles.push({ file, relativePath: file.name });
+          if (file) plainFiles.push({ file, relativePath: file.name });
         }
+      }
+
+      const allFiles: FileWithPath[] = [...plainFiles];
+      for (const entry of entries) {
+        const files = await collectEntries(entry);
+        allFiles.push(...files);
       }
 
       handleFilesWithPaths(allFiles);
@@ -161,7 +177,7 @@ export default function FileUpload({
           </SpaceBetween>
         )}
 
-        {!uploading && !result && (
+        {!uploading && !result && !error && (
           <div
             ref={dropRef}
             onDrop={handleDrop}
