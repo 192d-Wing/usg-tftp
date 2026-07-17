@@ -56,7 +56,7 @@ pub async fn list_files(State(state): State<AppState>, Query(query): Query<FileQ
             Err(_) => continue,
         };
         let name = entry.file_name().to_string_lossy().to_string();
-        if name.starts_with('.') {
+        if name.starts_with('.') || name == "lost+found" {
             continue;
         }
         let modified = meta
