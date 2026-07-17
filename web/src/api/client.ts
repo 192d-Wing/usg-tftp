@@ -40,23 +40,16 @@ export async function uploadFiles(
 ): Promise<UploadResult> {
   const allUploaded: string[] = [];
   const allErrors: string[] = [];
-  const batchSize = 10;
   const concurrency = 3;
   let completed = 0;
 
-  const batches: FileWithPath[][] = [];
-  for (let i = 0; i < items.length; i += batchSize) {
-    batches.push(items.slice(i, i + batchSize));
-  }
+  const params = targetPath
+    ? `?path=${encodeURIComponent(targetPath)}`
+    : "";
 
-  const sendBatch = async (batch: FileWithPath[]) => {
+  const sendOne = async (item: FileWithPath) => {
     const form = new FormData();
-    for (const item of batch) {
-      form.append("file", item.file, item.relativePath);
-    }
-    const params = targetPath
-      ? `?path=${encodeURIComponent(targetPath)}`
-      : "";
+    form.append("file", item.file, item.relativePath);
     const res = await fetch(`${BASE}/api/files/upload${params}`, {
       method: "POST",
       body: form,
@@ -64,12 +57,13 @@ export async function uploadFiles(
     const result = await handleResponse<UploadResult>(res);
     allUploaded.push(...result.uploaded);
     allErrors.push(...result.errors);
-    completed += batch.length;
+    completed++;
     onProgress?.(completed, items.length);
   };
 
-  for (let i = 0; i < batches.length; i += concurrency) {
-    await Promise.all(batches.slice(i, i + concurrency).map(sendBatch));
+  for (let i = 0; i < items.length; i += concurrency) {
+    const batch = items.slice(i, i + concurrency);
+    await Promise.all(batch.map(sendOne));
   }
 
   return { uploaded: allUploaded, errors: allErrors };
