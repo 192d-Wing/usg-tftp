@@ -1,0 +1,26 @@
+{{- if and .Values.cilium.enabled .Values.cilium.bgp.enabled .Values.cilium.bgp.clusterConfig.instances }}
+apiVersion: cilium.io/v2
+kind: CiliumBGPClusterConfig
+metadata:
+  name: {{ include "usg-tftp.fullname" . }}-bgp
+  labels:
+    {{- include "usg-tftp.labels" . | nindent 4 }}
+spec:
+  {{- with .Values.cilium.bgp.clusterConfig.nodeSelector }}
+  nodeSelector:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  bgpInstances:
+    {{- range .Values.cilium.bgp.clusterConfig.instances }}
+    - name: {{ .name }}
+      localASN: {{ .localASN }}
+      peers:
+        {{- range .peers }}
+        - name: {{ .name }}
+          peerASN: {{ .peerASN }}
+          peerAddress: {{ .peerAddress }}
+          peerConfigRef:
+            name: {{ .peerConfigRef }}
+        {{- end }}
+    {{- end }}
+{{- end }}

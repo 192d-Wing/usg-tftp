@@ -1,0 +1,29 @@
+{{- if and .Values.cilium.enabled .Values.cilium.bgp.enabled .Values.cilium.bgp.peerConfigs }}
+{{- range .Values.cilium.bgp.peerConfigs }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumBGPPeerConfig
+metadata:
+  name: {{ .name }}
+  labels:
+    {{- include "usg-tftp.labels" $ | nindent 4 }}
+spec:
+  {{- with .timers }}
+  timers:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- if not .timers }}
+  timers:
+    holdTimeSeconds: {{ .holdTimeSeconds | default 90 }}
+    keepAliveTimeSeconds: {{ .keepAliveTimeSeconds | default 30 }}
+  {{- end }}
+  {{- with .families }}
+  families:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  {{- with .transport }}
+  transport:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+{{- end }}
+{{- end }}

@@ -1,0 +1,37 @@
+{{- if .Values.webUI.enabled }}
+apiVersion: v1
+kind: Service
+metadata:
+  name: {{ include "usg-tftp.fullname" . }}-webui
+  labels:
+    {{- include "usg-tftp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webui
+  {{- with .Values.webUI.service.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  type: {{ .Values.webUI.service.type }}
+  {{- with .Values.service.ipFamilyPolicy }}
+  ipFamilyPolicy: {{ . }}
+  {{- end }}
+  {{- with .Values.service.ipFamilies }}
+  ipFamilies:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+  ports:
+    - name: https
+      port: {{ .Values.webUI.service.port }}
+      targetPort: https
+      protocol: TCP
+      {{- if and (eq .Values.webUI.service.type "NodePort") .Values.webUI.service.nodePort }}
+      nodePort: {{ .Values.webUI.service.nodePort }}
+      {{- end }}
+    - name: http
+      port: {{ .Values.webUI.service.httpPort }}
+      targetPort: http
+      protocol: TCP
+  selector:
+    {{- include "usg-tftp.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: webui
+{{- end }}

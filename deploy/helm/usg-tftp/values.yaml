@@ -114,6 +114,8 @@ service:
 
   # -- Load balancer IP. Only used when service.type is "LoadBalancer".
   # Set this to pin a stable IP (e.g. MetalLB, cloud static IP).
+  # Deprecated in Kubernetes 1.24+ — prefer controller-specific annotations
+  # for new deployments, but still functional on most controllers.
   loadBalancerIP: ""
 
   # -- Restrict load balancer source ranges (CIDR list).
@@ -124,6 +126,21 @@ service:
   # for TFTP access logging) but may cause uneven load distribution.
   # "Cluster" distributes evenly but SNATs client IPs.
   externalTrafficPolicy: Local
+
+  # -- IP family policy for dual-stack support. Options:
+  #   "SingleStack"      — single IP family only (default)
+  #   "PreferDualStack"  — dual-stack if available, single-stack fallback
+  #   "RequireDualStack" — fail if dual-stack is not available
+  # Requires Kubernetes 1.23+ with dual-stack networking enabled.
+  ipFamilyPolicy: ""
+
+  # -- IP families to allocate. Order determines the primary family.
+  # Examples:
+  #   [IPv4]         — IPv4 only (default when ipFamilyPolicy is SingleStack)
+  #   [IPv6]         — IPv6 only
+  #   [IPv4, IPv6]   — dual-stack, IPv4 primary
+  #   [IPv6, IPv4]   — dual-stack, IPv6 primary
+  ipFamilies: []
 
 # -- Use hostNetwork mode. Binds the pod directly to the node's network
 # namespace so TFTP listens on the node's own IP:69. Useful on bare-metal
@@ -460,3 +477,171 @@ extraVolumeMounts: []
 #     - name: RUST_LOG
 #       value: "debug"
 extraEnv: []
+
+# ---------------------------------------------------------------------------
+# Web UI (separate deployment for TFTP file management)
+# ---------------------------------------------------------------------------
+webUI:
+  # -- Enable the web UI deployment. When enabled, a separate Deployment and
+  # Service are created. The web UI shares the TFTP root directory via a
+  # ReadWriteMany PVC.
+  enabled: false
+
+  # -- Number of web UI replicas.
+  replicaCount: 1
+
+  image:
+    # -- Web UI container image.
+    repository: ghcr.io/192d-wing/usg-tftp-webui
+
+    # -- Image pull policy.
+    pullPolicy: IfNotPresent
+
+    # -- Image tag. Defaults to the chart's appVersion if left empty.
+    tag: ""
+
+  service:
+    # -- Service type for the web UI.
+    type: ClusterIP
+
+    # -- HTTPS port for the web UI.
+    port: 443
+
+    # -- HTTP port (used for ACME challenges and HTTP→HTTPS redirect).
+    httpPort: 80
+
+    # -- Node port (only used when service.type is "NodePort").
+    nodePort: null
+
+    # -- Annotations on the web UI Service.
+    annotations: {}
+
+  # -- TLS configuration for the web UI.
+  tls:
+    # -- Enable ACME (Let's Encrypt) automatic certificate provisioning.
+    acmeEnabled: false
+
+    # -- Domain name for the ACME certificate (required when acmeEnabled is true).
+    acmeDomain: ""
+
+    # -- Contact email for Let's Encrypt notifications.
+    acmeEmail: ""
+
+    # -- ACME directory URL. Default is Let's Encrypt production.
+    # Use "https://acme-staging-v02.api.letsencrypt.org/directory" for testing.
+    acmeDirectoryUrl: ""
+
+    # -- Use ACME staging environment (for testing without rate limits).
+    acmeStaging: false
+
+    # -- Path to a manually-provided TLS certificate (PEM).
+    # Use for air-gapped environments without ACME.
+    certPath: ""
+
+    # -- Path to the TLS private key (PEM).
+    keyPath: ""
+
+  # -- Maximum upload size in bytes (default: 500 MB).
+  maxUploadBytes: 524288000
+
+  # -- Enable CORS headers on the API.
+  corsEnabled: false
+
+  # -- CPU and memory resources for the web UI container.
+  resources: {}
+
+  # -- Node selector for the web UI pods.
+  nodeSelector: {}
+
+  # -- Tolerations for the web UI pods.
+  tolerations: []
+
+  # -- Affinity rules for the web UI pods.
+  affinity: {}
+
+# ---------------------------------------------------------------------------
+# Cilium Integration (LB-IPAM + BGP Control Plane)
+# ---------------------------------------------------------------------------
+# Optional Cilium resources for LoadBalancer IP allocation and BGP route
+# advertisement. Enable when running Cilium as the CNI on K8s or K3s.
+#
+# Prerequisites:
+#   - Cilium installed with bgpControlPlane.enabled=true (for BGP features)
+#   - K3s: --flannel-backend=none --disable-network-policy --disable=servicelb
+cilium:
+  # -- Enable Cilium LB-IPAM and BGP resource creation.
+  enabled: false
+
+  # -- LoadBalancer IP address pools. Each entry creates a
+  # CiliumLoadBalancerIPPool resource. Cilium LB-IPAM assigns IPs from
+  # these pools to Services with type: LoadBalancer.
+  # Example:
+  #   lbIPPools:
+  #     - name: tftp-v4
+  #       blocks:
+  #         - cidr: 10.0.0.48/28
+  #       labels:
+  #         network: k3s-pod-cidrs
+  #     - name: tftp-v6
+  #       blocks:
+  #         - cidr: fd00::/120
+  #       labels:
+  #         network: k3s-pod-cidrs
+  lbIPPools: []
+
+  # -- BGP configuration. Creates BGP peering, peer config, and
+  # advertisement resources for advertising LoadBalancer IPs to
+  # upstream routers.
+  bgp:
+    # -- Enable BGP resource creation (requires cilium.enabled: true).
+    enabled: false
+
+    # -- BGP peer configurations. Each entry creates a CiliumBGPPeerConfig.
+    # Referenced by name from clusterConfig peers.
+    # Example:
+    #   peerConfigs:
+    #     - name: default-peer
+    #       holdTimeSeconds: 90
+    #       keepAliveTimeSeconds: 30
+    #       families:
+    #         - afi: ipv4
+    #           safi: unicast
+    #         - afi: ipv6
+    #           safi: unicast
+    peerConfigs: []
+
+    # -- BGP cluster configuration. Creates a CiliumBGPClusterConfig that
+    # selects which nodes participate in BGP and defines peering sessions.
+    # Example:
+    #   clusterConfig:
+    #     nodeSelector:
+    #       matchLabels:
+    #         k3s-pod-cidrs: "true"
+    #     instances:
+    #       - name: default
+    #         localASN: 64512
+    #         peers:
+    #           - name: upstream-router
+    #             peerASN: 64513
+    #             peerAddress: 10.0.0.1
+    #             peerConfigRef: default-peer
+    clusterConfig:
+      nodeSelector: {}
+      instances: []
+
+    # -- BGP advertisements. Each entry creates a CiliumBGPAdvertisement
+    # that controls which IPs are announced over BGP.
+    # Example:
+    #   advertisements:
+    #     - name: tftp-lb
+    #       advertisementType: Service
+    #       service:
+    #         addresses:
+    #           - ExternalIP
+    #           - LoadBalancerIP
+    #       selector:
+    #         matchLabels:
+    #           network: k3s-pod-cidrs
+    #       labels:
+    #         network: k3s-pod-cidrs
+    advertisements: []

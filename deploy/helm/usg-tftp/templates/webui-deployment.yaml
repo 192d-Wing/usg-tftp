@@ -1,0 +1,109 @@
+{{- if .Values.webUI.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "usg-tftp.fullname" . }}-webui
+  labels:
+    {{- include "usg-tftp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webui
+spec:
+  replicas: {{ .Values.webUI.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "usg-tftp.selectorLabels" . | nindent 6 }}
+      app.kubernetes.io/component: webui
+  template:
+    metadata:
+      labels:
+        {{- include "usg-tftp.labels" . | nindent 8 }}
+        app.kubernetes.io/component: webui
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      serviceAccountName: {{ include "usg-tftp.serviceAccountName" . }}
+      securityContext:
+        fsGroup: 1000
+      containers:
+        - name: webui
+          image: "{{ .Values.webUI.image.repository }}:{{ .Values.webUI.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.webUI.image.pullPolicy }}
+          args:
+            - "--config"
+            - "/etc/usg-tftp/tftp.toml"
+          ports:
+            - name: https
+              containerPort: 443
+              protocol: TCP
+            - name: http
+              containerPort: 80
+              protocol: TCP
+          {{- $tlsEnabled := or (and .Values.webUI.tls.certPath (ne .Values.webUI.tls.certPath "")) .Values.webUI.tls.acmeEnabled }}
+          livenessProbe:
+            httpGet:
+              path: /api/status
+              port: {{ if $tlsEnabled }}https{{ else }}http{{ end }}
+              scheme: {{ if $tlsEnabled }}HTTPS{{ else }}HTTP{{ end }}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/status
+              port: {{ if $tlsEnabled }}https{{ else }}http{{ end }}
+              scheme: {{ if $tlsEnabled }}HTTPS{{ else }}HTTP{{ end }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          securityContext:
+            readOnlyRootFilesystem: true
+            runAsNonRoot: true
+            runAsUser: 1000
+            runAsGroup: 1000
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop:
+                - ALL
+              add:
+                - NET_BIND_SERVICE
+          {{- with .Values.webUI.resources }}
+          resources:
+            {{- toYaml . | nindent 12 }}
+          {{- end }}
+          volumeMounts:
+            - name: config
+              mountPath: /etc/usg-tftp
+              readOnly: true
+            - name: data
+              mountPath: {{ .Values.config.rootDir }}
+            - name: acme-cache
+              mountPath: /var/lib/usg-tftp/acme
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: config
+          configMap:
+            name: {{ include "usg-tftp.fullname" . }}-config
+        - name: data
+          {{- if .Values.persistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ .Values.persistence.existingClaim | default (printf "%s-data" (include "usg-tftp.fullname" .)) }}
+          {{- else }}
+          emptyDir: {}
+          {{- end }}
+        - name: acme-cache
+          emptyDir: {}
+        - name: tmp
+          emptyDir: {}
+      {{- with .Values.webUI.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webUI.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.webUI.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}

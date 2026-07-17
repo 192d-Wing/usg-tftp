@@ -1,0 +1,25 @@
+{{- if and .Values.cilium.enabled .Values.cilium.bgp.enabled .Values.cilium.bgp.advertisements }}
+{{- range .Values.cilium.bgp.advertisements }}
+---
+apiVersion: cilium.io/v2
+kind: CiliumBGPAdvertisement
+metadata:
+  name: {{ .name }}
+  labels:
+    {{- include "usg-tftp.labels" $ | nindent 4 }}
+    {{- with .labels }}
+    {{- toYaml . | nindent 4 }}
+    {{- end }}
+spec:
+  advertisements:
+    - advertisementType: {{ .advertisementType | default "Service" }}
+      {{- with .service }}
+      service:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .selector }}
+      selector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+{{- end }}
+{{- end }}

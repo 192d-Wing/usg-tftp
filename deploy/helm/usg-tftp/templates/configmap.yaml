@@ -75,3 +75,20 @@ data:
     sender_channel_size = {{ .Values.config.performance.workerPool.senderChannelSize }}
     load_balance_strategy = {{ .Values.config.performance.workerPool.loadBalanceStrategy | quote }}
     enable_cpu_affinity = {{ .Values.config.performance.workerPool.enableCpuAffinity }}
+    {{- if .Values.webUI.enabled }}
+
+    [web]
+    bind_addr = "0.0.0.0:443"
+    max_upload_bytes = {{ int64 .Values.webUI.maxUploadBytes }}
+    cors_enabled = {{ .Values.webUI.corsEnabled }}
+
+    [web.tls]
+    acme_enabled = {{ .Values.webUI.tls.acmeEnabled }}
+    acme_domain = {{ .Values.webUI.tls.acmeDomain | quote }}
+    acme_email = {{ .Values.webUI.tls.acmeEmail | quote }}
+    acme_directory_url = {{ .Values.webUI.tls.acmeDirectoryUrl | quote }}
+    acme_cache_dir = "/var/lib/usg-tftp/acme"
+    acme_staging = {{ .Values.webUI.tls.acmeStaging }}
+    cert_path = {{ .Values.webUI.tls.certPath | quote }}
+    key_path = {{ .Values.webUI.tls.keyPath | quote }}
+    {{- end }}

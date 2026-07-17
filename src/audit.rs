@@ -520,12 +520,9 @@ impl AuditLogger {
         duration_ms: u64,
         correlation_id: &str,
     ) {
-        // Calculate performance metrics
-        let throughput_bps = if duration_ms > 0 {
-            (bytes_transferred * 1000) / duration_ms
-        } else {
-            0
-        };
+        let throughput_bps = (bytes_transferred * 1000)
+            .checked_div(duration_ms)
+            .unwrap_or(0);
 
         let avg_block_time_ms = if blocks_sent > 0 && duration_ms > 0 {
             duration_ms as f64 / blocks_sent as f64
@@ -554,12 +551,9 @@ impl AuditLogger {
         blocks_sent: u16,
         duration_ms: u64,
     ) {
-        // Calculate performance metrics
-        let throughput_bps = if duration_ms > 0 {
-            (bytes_transferred * 1000) / duration_ms
-        } else {
-            0
-        };
+        let throughput_bps = (bytes_transferred * 1000)
+            .checked_div(duration_ms)
+            .unwrap_or(0);
 
         let avg_block_time_ms = if blocks_sent > 0 && duration_ms > 0 {
             duration_ms as f64 / blocks_sent as f64
@@ -642,11 +636,9 @@ impl AuditLogger {
         duration_ms: u64,
         file_created: bool,
     ) {
-        let throughput_bps = if duration_ms > 0 {
-            (bytes_received * 1000) / duration_ms
-        } else {
-            0
-        };
+        let throughput_bps = (bytes_received * 1000)
+            .checked_div(duration_ms)
+            .unwrap_or(0);
 
         let avg_block_time_ms = if blocks_received > 0 && duration_ms > 0 {
             duration_ms as f64 / blocks_received as f64
