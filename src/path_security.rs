@@ -30,11 +30,22 @@ pub fn validate_and_resolve_path(root_dir: &Path, filename: &str) -> Result<Path
         if !canonical_file.starts_with(&canonical_root) {
             return Err(TftpError::Tftp("Access denied".to_string()));
         }
-    } else if let Some(parent) = file_path.parent()
-        && let Ok(canonical_parent) = parent.canonicalize()
-        && !canonical_parent.starts_with(&canonical_root)
-    {
-        return Err(TftpError::Tftp("Access denied".to_string()));
+    } else {
+        let mut ancestor = file_path.parent();
+        let mut found = false;
+        while let Some(dir) = ancestor {
+            if let Ok(canonical_dir) = dir.canonicalize() {
+                if !canonical_dir.starts_with(&canonical_root) {
+                    return Err(TftpError::Tftp("Access denied".to_string()));
+                }
+                found = true;
+                break;
+            }
+            ancestor = dir.parent();
+        }
+        if !found {
+            return Err(TftpError::Tftp("Access denied".to_string()));
+        }
     }
 
     Ok(file_path)

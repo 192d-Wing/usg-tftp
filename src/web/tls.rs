@@ -72,7 +72,7 @@ async fn serve_acme_tls(
 
     let mut acme_config = AcmeConfig::new([domain.as_str()])
         .cache(DirCache::new(cache_dir))
-        .directory_lets_encrypt(tls_config.acme_staging);
+        .directory_lets_encrypt(!tls_config.acme_staging);
 
     if !tls_config.acme_email.is_empty() {
         acme_config = acme_config.contact([format!("mailto:{}", tls_config.acme_email)]);

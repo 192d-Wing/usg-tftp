@@ -112,6 +112,7 @@ pub async fn download_file(
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_else(|| "download".to_string());
+    let safe_filename = filename.replace('"', "").replace(['\\', '\r', '\n'], "_");
     let content_type = mime_guess::from_path(&file_path)
         .first_or_octet_stream()
         .to_string();
@@ -124,7 +125,7 @@ pub async fn download_file(
         .header("Content-Type", content_type)
         .header(
             "Content-Disposition",
-            format!("attachment; filename=\"{}\"", filename),
+            format!("attachment; filename=\"{}\"", safe_filename),
         )
         .body(body)
         .unwrap_or_else(|_| api_error(StatusCode::INTERNAL_SERVER_ERROR, "Stream error"))
@@ -176,7 +177,8 @@ pub async fn upload_files(
             }
         };
 
-        let tmp_path = dest.with_extension("tftp-tmp");
+        let tmp_name = format!(".tftp-tmp-{}", uuid::Uuid::new_v4());
+        let tmp_path = dest.with_file_name(tmp_name);
         if let Err(e) = fs::write(&tmp_path, &data).await {
             errors.push(format!("{}: {}", relative, e));
             let _ = fs::remove_file(&tmp_path).await;
