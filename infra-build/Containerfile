@@ -9,9 +9,9 @@ RUN cargo build --release --bin usg-tftp-server --bin usg-tftp-client
 
 FROM registry1.dso.mil/ironbank/redhat/ubi/ubi10:latest
 
-RUN microdnf install -y --nodocs \
+RUN dnf install -y --nodocs \
     ca-certificates shadow-utils procps-ng \
-    && microdnf clean all
+    && dnf clean all
 
 RUN groupadd --system tftp && useradd --system --gid tftp --no-create-home tftp
 
