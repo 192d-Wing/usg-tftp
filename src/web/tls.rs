@@ -83,8 +83,16 @@ async fn serve_acme_tls(
             )
         })?;
         let mut root_store = rustls::RootCertStore::empty();
-        for cert in rustls_pemfile::certs(&mut &ca_pem[..]) {
-            root_store.add(cert?)?;
+        let pem_certs: Vec<_> = rustls_pemfile::certs(&mut &ca_pem[..])
+            .filter_map(|r| r.ok())
+            .collect();
+        if pem_certs.is_empty() {
+            let der_cert = rustls::pki_types::CertificateDer::from(ca_pem);
+            root_store.add(der_cert)?;
+        } else {
+            for cert in pem_certs {
+                root_store.add(cert)?;
+            }
         }
         let client_config = rustls::ClientConfig::builder()
             .with_root_certificates(root_store)
