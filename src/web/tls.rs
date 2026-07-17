@@ -113,7 +113,8 @@ async fn serve_acme_tls(
     }
 
     let mut acme_state = acme_config.state();
-    let server_config = acme_state.default_rustls_config();
+    let acceptor = acme_state.axum_acceptor(acme_state.default_rustls_config());
+
     tokio::spawn(async move {
         while let Some(event) = acme_state.next().await {
             match event {
@@ -125,8 +126,8 @@ async fn serve_acme_tls(
 
     info!("ACME HTTPS listener ready on {}", bind_addr);
 
-    let axum_tls_config = axum_server::tls_rustls::RustlsConfig::from_config(server_config);
-    axum_server::bind_rustls(bind_addr, axum_tls_config)
+    axum_server::bind(bind_addr)
+        .acceptor(acceptor)
         .serve(app.into_make_service())
         .await?;
 
