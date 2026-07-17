@@ -1,4 +1,23 @@
 {{- if and .Values.webUI.enabled .Values.webUI.ingress.enabled }}
+{{- if .Values.webUI.ingress.passthrough }}
+apiVersion: traefik.io/v1alpha1
+kind: IngressRouteTCP
+metadata:
+  name: {{ include "usg-tftp.fullname" . }}-webui
+  labels:
+    {{- include "usg-tftp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webui
+spec:
+  entryPoints:
+    - websecure
+  routes:
+    - match: HostSNI(`{{ .Values.webUI.ingress.host }}`)
+      services:
+        - name: {{ include "usg-tftp.fullname" . }}-webui
+          port: {{ .Values.webUI.service.port }}
+  tls:
+    passthrough: true
+{{- else }}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -29,4 +48,5 @@ spec:
                 name: {{ include "usg-tftp.fullname" . }}-webui
                 port:
                   number: {{ .Values.webUI.service.port }}
+{{- end }}
 {{- end }}

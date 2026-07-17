@@ -524,16 +524,19 @@ webUI:
     # -- Ingress class name (e.g. "traefik", "nginx").
     className: ""
 
-    # -- Annotations on the Ingress resource.
-    # For Traefik TLS passthrough (when the pod handles TLS via ACME):
-    #   traefik.ingress.kubernetes.io/router.tls: "true"
-    #   traefik.ingress.kubernetes.io/router.tls.passthrough: "true"
+    # -- Use Traefik IngressRouteTCP with TLS passthrough.
+    # When true, Traefik forwards TLS connections directly to the pod
+    # (the pod terminates TLS via ACME). Requires the Traefik CRD.
+    # When false, a standard Ingress resource is created instead.
+    passthrough: false
+
+    # -- Annotations on the Ingress resource (only used when passthrough is false).
     annotations: {}
 
     # -- Hostname for the Ingress rule.
     host: ""
 
-    # -- TLS configuration for the Ingress.
+    # -- TLS configuration for the Ingress (only used when passthrough is false).
     tls: []
     #  - secretName: webui-tls
     #    hosts:
