@@ -72,7 +72,8 @@ async fn serve_acme_tls(
 
     let mut acme_config = AcmeConfig::new([domain.as_str()])
         .cache(DirCache::new(cache_dir))
-        .directory_lets_encrypt(!tls_config.acme_staging);
+        .directory_lets_encrypt(!tls_config.acme_staging)
+        .challenge_type(rustls_acme::UseChallenge::Http01);
 
     if !tls_config.acme_ca_cert_path.is_empty() {
         let ca_pem = std::fs::read(&tls_config.acme_ca_cert_path).map_err(|e| {
@@ -114,6 +115,7 @@ async fn serve_acme_tls(
 
     let mut acme_state = acme_config.state();
     let server_config = acme_state.default_rustls_config();
+    let challenge_service = acme_state.http01_challenge_tower_service();
 
     tokio::spawn(async move {
         while let Some(event) = acme_state.next().await {
@@ -122,6 +124,15 @@ async fn serve_acme_tls(
                 Err(err) => tracing::error!("ACME error: {:?}", err),
             }
         }
+    });
+
+    let http_addr = SocketAddr::from(([0, 0, 0, 0], 80));
+    let http_app = axum::Router::new()
+        .route_service("/.well-known/acme-challenge/{challenge_token}", challenge_service);
+    info!("ACME HTTP-01 challenge listener on {}", http_addr);
+    tokio::spawn(async move {
+        let listener = TcpListener::bind(http_addr).await.unwrap();
+        axum::serve(listener, http_app).await.unwrap();
     });
 
     info!("ACME HTTPS listener ready on {}", bind_addr);
