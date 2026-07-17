@@ -3,3 +3,4 @@
 *.tftp-tmp
 web/node_modules/
 web/dist/
+*.tsbuildinfo
