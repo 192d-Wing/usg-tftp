@@ -460,11 +460,7 @@ pub async fn audit_log(State(state): State<AppState>, Query(query): Query<AuditQ
     let offset = query.offset.unwrap_or(0);
     let limit = query.limit.unwrap_or(50).min(500);
 
-    let events: Vec<serde_json::Value> = all_events
-        .into_iter()
-        .skip(offset)
-        .take(limit)
-        .collect();
+    let events: Vec<serde_json::Value> = all_events.into_iter().skip(offset).take(limit).collect();
 
     (
         StatusCode::OK,
