@@ -2005,9 +2005,10 @@ impl TftpServer {
                                 &socket,
                                 TftpErrorCode::IllegalOperation,
                                 "Out of order block",
-                        )
-                        .await?;
-                        return Ok(());
+                            )
+                            .await?;
+                            return Ok(());
+                        }
                     }
 
                     // Get data from packet
@@ -2322,7 +2323,12 @@ impl TftpServer {
                 Ok(_) => return Ok(()),
                 Err(e) => {
                     if attempt + 1 < MAX_RETRIES {
-                        debug!("Send failed (attempt {}/{}): {}", attempt + 1, MAX_RETRIES, e);
+                        debug!(
+                            "Send failed (attempt {}/{}): {}",
+                            attempt + 1,
+                            MAX_RETRIES,
+                            e
+                        );
                         tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
                     } else {
                         return Err(e.into());
@@ -2391,6 +2397,7 @@ impl TftpServer {
                             expected_block, ack_block
                         );
                         Err(TftpError::Tftp("ACK out of sequence".to_string()))
+                    }
                 }
             }
             Ok(Err(e)) => {
