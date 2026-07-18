@@ -24,3 +24,27 @@ export interface UploadResult {
 export interface ApiError {
   error: string;
 }
+
+export interface AuditEntry {
+  event_type: string;
+  timestamp: string;
+  path?: string;
+  filename?: string;
+  client_addr?: string;
+  size?: number;
+  is_dir?: boolean;
+  source?: string;
+  severity?: string;
+  reason?: string;
+  error?: string;
+  bytes_transferred?: number;
+  duration_ms?: number;
+  [key: string]: unknown;
+}
+
+export interface AuditResponse {
+  events: AuditEntry[];
+  total: number;
+  offset: number;
+  limit: number;
+}

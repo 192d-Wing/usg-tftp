@@ -84,6 +84,8 @@ spec:
               mountPath: /etc/usg-tftp/acme-ca
               readOnly: true
             {{- end }}
+            - name: logs
+              mountPath: /var/log/usg-tftp
             - name: tmp
               mountPath: /tmp
       volumes:
@@ -109,6 +111,8 @@ spec:
           {{- else }}
           emptyDir: {}
           {{- end }}
+        - name: logs
+          emptyDir: {}
         - name: tmp
           emptyDir: {}
       {{- with .Values.webUI.nodeSelector }}

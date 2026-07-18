@@ -9,6 +9,7 @@ use tokio_util::io::ReaderStream;
 use tracing::{error, info, warn};
 
 use super::AppState;
+use super::audit::{AuditQuery, AuditResponse};
 use super::models::*;
 use crate::path_security::validate_and_resolve_path;
 
@@ -243,6 +244,11 @@ pub async fn upload_files(
             continue;
         }
 
+        let file_size = fs::metadata(&dest).await.map(|m| m.len()).unwrap_or(0);
+        state
+            .audit_logger
+            .file_uploaded(&full_relative, file_size)
+            .await;
         info!(path = %full_relative, "Web UI file uploaded");
         uploaded.push(full_relative);
     }
@@ -303,6 +309,10 @@ pub async fn delete_file(
 
     match result {
         Ok(()) => {
+            state
+                .audit_logger
+                .file_deleted(req_path, meta.is_dir())
+                .await;
             info!(path = %req_path, is_dir = meta.is_dir(), "Web UI file deleted");
             StatusCode::NO_CONTENT.into_response()
         }
@@ -332,6 +342,7 @@ pub async fn create_directory(
 
     match fs::create_dir_all(&dir_path).await {
         Ok(()) => {
+            state.audit_logger.directory_created(req_path).await;
             info!(path = %req_path, "Web UI directory created");
             StatusCode::CREATED.into_response()
         }
@@ -385,4 +396,86 @@ pub async fn server_status(State(state): State<AppState>) -> Json<ServerStatus> 
         disk_available_bytes: disk_available,
         tls_mode,
     })
+}
+
+pub async fn audit_log(
+    State(state): State<AppState>,
+    Query(query): Query<AuditQuery>,
+) -> Response {
+    let log_path = state.audit_logger.log_path();
+    let tftp_log_path = state.config.logging.file.as_deref();
+
+    let mut all_events: Vec<serde_json::Value> = Vec::new();
+
+    // Read web UI audit log
+    if let Ok(contents) = tokio::fs::read_to_string(log_path).await {
+        for line in contents.lines() {
+            if let Ok(event) = serde_json::from_str::<serde_json::Value>(line) {
+                all_events.push(event);
+            }
+        }
+    }
+
+    // Read TFTP audit log if accessible
+    if let Some(tftp_path) = tftp_log_path {
+        if tftp_path.exists() && tftp_path != log_path {
+            if let Ok(contents) = tokio::fs::read_to_string(tftp_path).await {
+                for line in contents.lines() {
+                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(line) {
+                        all_events.push(event);
+                    }
+                }
+            }
+        }
+    }
+
+    // Filter by event_type
+    if let Some(ref event_type) = query.event_type {
+        all_events.retain(|e| {
+            e.get("event_type")
+                .and_then(|v| v.as_str())
+                .is_some_and(|t| t == event_type)
+        });
+    }
+
+    // Filter by search (matches path/filename fields)
+    if let Some(ref search) = query.search {
+        let search_lower = search.to_lowercase();
+        all_events.retain(|e| {
+            let check_field = |field: &str| -> bool {
+                e.get(field)
+                    .and_then(|v| v.as_str())
+                    .is_some_and(|s| s.to_lowercase().contains(&search_lower))
+            };
+            check_field("path") || check_field("filename") || check_field("client_addr")
+        });
+    }
+
+    // Sort by timestamp descending (newest first)
+    all_events.sort_by(|a, b| {
+        let ts_a = a.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+        let ts_b = b.get("timestamp").and_then(|v| v.as_str()).unwrap_or("");
+        ts_b.cmp(ts_a)
+    });
+
+    let total = all_events.len();
+    let offset = query.offset.unwrap_or(0);
+    let limit = query.limit.unwrap_or(50).min(500);
+
+    let events: Vec<serde_json::Value> = all_events
+        .into_iter()
+        .skip(offset)
+        .take(limit)
+        .collect();
+
+    (
+        StatusCode::OK,
+        Json(AuditResponse {
+            events,
+            total,
+            offset,
+            limit,
+        }),
+    )
+        .into_response()
 }

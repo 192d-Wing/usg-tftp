@@ -8,6 +8,7 @@ use tracing_subscriber::EnvFilter;
 
 use usg_tftp::config::TftpConfig;
 use usg_tftp::web;
+use usg_tftp::web::audit::WebAuditLogger;
 
 #[derive(Parser, Debug)]
 #[command(name = "usg-tftp-webui", about = "USG TFTP Web UI")]
@@ -52,10 +53,12 @@ async fn main() -> anyhow::Result<()> {
 
     let bind_addr = config.web.bind_addr;
     let tls_config = config.web.tls.clone();
+    let audit_logger = WebAuditLogger::new(&config.web.audit_log_path);
 
     let state = web::AppState {
         config: Arc::new(config),
         start_time: std::time::Instant::now(),
+        audit_logger,
     };
 
     let app = web::create_router(state);

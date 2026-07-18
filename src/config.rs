@@ -69,6 +69,7 @@ pub struct WebConfig {
     pub max_upload_bytes: u64,
     pub cors_enabled: bool,
     pub tls: TlsConfig,
+    pub audit_log_path: String,
 }
 
 impl Default for WebConfig {
@@ -78,6 +79,7 @@ impl Default for WebConfig {
             max_upload_bytes: 524_288_000, // 500 MB
             cors_enabled: false,
             tls: TlsConfig::default(),
+            audit_log_path: "/var/log/usg-tftp/webui-audit.jsonl".to_string(),
         }
     }
 }

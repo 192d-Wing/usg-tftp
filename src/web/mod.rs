@@ -1,3 +1,4 @@
+pub mod audit;
 pub mod handlers;
 pub mod models;
 pub mod static_files;
@@ -13,10 +14,13 @@ use tower_http::trace::TraceLayer;
 
 use crate::config::TftpConfig;
 
+use self::audit::WebAuditLogger;
+
 #[derive(Clone)]
 pub struct AppState {
     pub config: Arc<TftpConfig>,
     pub start_time: std::time::Instant,
+    pub audit_logger: WebAuditLogger,
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -33,7 +37,8 @@ pub fn create_router(state: AppState) -> Router {
         .route("/api/files/download", get(handlers::download_file))
         .merge(upload)
         .route("/api/files/mkdir", post(handlers::create_directory))
-        .route("/api/status", get(handlers::server_status));
+        .route("/api/status", get(handlers::server_status))
+        .route("/api/audit", get(handlers::audit_log));
 
     let mut app = Router::new()
         .merge(api)

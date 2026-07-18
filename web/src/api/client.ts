@@ -1,4 +1,4 @@
-import type { FileEntry, ServerStatus, UploadResult, ApiError } from "./types";
+import type { FileEntry, ServerStatus, UploadResult, ApiError, AuditResponse } from "./types";
 
 const BASE = "";
 
@@ -123,4 +123,20 @@ export async function createDirectory(path: string): Promise<void> {
 export async function getServerStatus(): Promise<ServerStatus> {
   const res = await fetch(`${BASE}/api/status`);
   return handleResponse<ServerStatus>(res);
+}
+
+export async function getAuditLog(params: {
+  offset?: number;
+  limit?: number;
+  event_type?: string;
+  search?: string;
+}): Promise<AuditResponse> {
+  const query = new URLSearchParams();
+  if (params.offset) query.set("offset", String(params.offset));
+  if (params.limit) query.set("limit", String(params.limit));
+  if (params.event_type) query.set("event_type", params.event_type);
+  if (params.search) query.set("search", params.search);
+  const qs = query.toString();
+  const res = await fetch(`${BASE}/api/audit${qs ? `?${qs}` : ""}`);
+  return handleResponse<AuditResponse>(res);
 }
