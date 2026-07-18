@@ -47,9 +47,6 @@ async fn serve_with_proxy_protocol(
     listener: TcpListener,
     tls_acceptor: Option<tokio_rustls::TlsAcceptor>,
 ) -> anyhow::Result<()> {
-    use hyper_util::rt::{TokioExecutor, TokioIo};
-    use hyper_util::server::conn::auto::Builder;
-
     let mut consecutive_errors = 0u32;
     loop {
         let (mut stream, _peer_addr) = match listener.accept().await {
@@ -85,18 +82,6 @@ async fn serve_with_proxy_protocol(
                 }
             };
 
-            let serve = |io: TokioIo<_>| async move {
-                let service = hyper::service::service_fn(move |mut req| {
-                    req.extensions_mut().insert(ConnectInfo(real_addr));
-                    let app = app.clone();
-                    async move { app.oneshot(req).await }
-                });
-                let mut builder = Builder::new(TokioExecutor::new());
-                #[cfg(feature = "webui")]
-                builder.http2().enable_connect_protocol();
-                let _ = builder.serve_connection_with_upgrades(io, service).await;
-            };
-
             if let Some(acceptor) = tls_acceptor {
                 let tls_result =
                     tokio::time::timeout(TLS_HANDSHAKE_TIMEOUT, acceptor.accept(stream)).await;
@@ -110,16 +95,37 @@ async fn serve_with_proxy_protocol(
                         {
                             return;
                         }
-                        serve(TokioIo::new(tls_stream)).await;
+                        serve_http(tls_stream, app, real_addr).await;
                     }
                     Ok(Err(e)) => tracing::debug!("TLS handshake failed: {}", e),
                     Err(_) => tracing::debug!("TLS handshake timed out"),
                 }
             } else {
-                serve(TokioIo::new(stream)).await;
+                serve_http(stream, app, real_addr).await;
             }
         });
     }
+}
+
+async fn serve_http(
+    io: impl tokio::io::AsyncRead + tokio::io::AsyncWrite + Send + Unpin + 'static,
+    app: Router,
+    real_addr: SocketAddr,
+) {
+    use hyper_util::rt::{TokioExecutor, TokioIo};
+    use hyper_util::server::conn::auto::Builder;
+
+    let service = hyper::service::service_fn(move |mut req| {
+        req.extensions_mut().insert(ConnectInfo(real_addr));
+        let app = app.clone();
+        async move { app.oneshot(req).await }
+    });
+    let mut builder = Builder::new(TokioExecutor::new());
+    #[cfg(feature = "webui")]
+    builder.http2().enable_connect_protocol();
+    let _ = builder
+        .serve_connection_with_upgrades(TokioIo::new(io), service)
+        .await;
 }
 
 async fn serve_manual_tls(
@@ -163,7 +169,6 @@ async fn serve_acme_tls(
     tls_config: &TlsConfig,
     proxy_protocol_enabled: bool,
 ) -> anyhow::Result<()> {
-    use futures_lite::StreamExt;
     use rustls_acme::AcmeConfig;
     use rustls_acme::caches::DirCache;
 
@@ -232,7 +237,7 @@ async fn serve_acme_tls(
         acme_config = acme_config.directory(tls_config.acme_directory_url.clone());
     }
 
-    let mut acme_state = acme_config.state();
+    let acme_state = acme_config.state();
 
     if proxy_protocol_enabled {
         let rustls_config = acme_state.default_rustls_config();
