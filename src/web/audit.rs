@@ -27,16 +27,6 @@ pub enum WebAuditEvent {
     },
 }
 
-impl WebAuditEvent {
-    fn timestamp(&self) -> &str {
-        match self {
-            Self::WebFileUploaded { timestamp, .. }
-            | Self::WebFileDeleted { timestamp, .. }
-            | Self::WebDirectoryCreated { timestamp, .. } => timestamp,
-        }
-    }
-}
-
 #[derive(Clone)]
 pub struct WebAuditLogger {
     log_path: PathBuf,
@@ -58,11 +48,11 @@ impl WebAuditLogger {
             }
         };
 
-        if let Some(parent) = self.log_path.parent() {
-            if let Err(e) = tokio::fs::create_dir_all(parent).await {
-                error!("Failed to create audit log directory: {}", e);
-                return;
-            }
+        if let Some(parent) = self.log_path.parent()
+            && let Err(e) = tokio::fs::create_dir_all(parent).await
+        {
+            error!("Failed to create audit log directory: {}", e);
+            return;
         }
 
         match OpenOptions::new()

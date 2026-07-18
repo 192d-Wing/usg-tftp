@@ -399,10 +399,7 @@ pub async fn server_status(State(state): State<AppState>) -> Json<ServerStatus> 
     })
 }
 
-pub async fn audit_log(
-    State(state): State<AppState>,
-    Query(query): Query<AuditQuery>,
-) -> Response {
+pub async fn audit_log(State(state): State<AppState>, Query(query): Query<AuditQuery>) -> Response {
     let log_path = state.audit_logger.log_path();
     let tftp_log_path = state.config.logging.file.as_deref();
 
@@ -418,14 +415,14 @@ pub async fn audit_log(
     }
 
     // Read TFTP audit log if accessible
-    if let Some(tftp_path) = tftp_log_path {
-        if tftp_path.exists() && tftp_path != log_path {
-            if let Ok(contents) = tokio::fs::read_to_string(tftp_path).await {
-                for line in contents.lines() {
-                    if let Ok(event) = serde_json::from_str::<serde_json::Value>(line) {
-                        all_events.push(event);
-                    }
-                }
+    if let Some(tftp_path) = tftp_log_path
+        && tftp_path.exists()
+        && tftp_path != log_path
+        && let Ok(contents) = tokio::fs::read_to_string(tftp_path).await
+    {
+        for line in contents.lines() {
+            if let Ok(event) = serde_json::from_str::<serde_json::Value>(line) {
+                all_events.push(event);
             }
         }
     }
