@@ -12,7 +12,7 @@ use tracing::{error, info, warn};
 use super::AppState;
 use super::audit::{AuditQuery, AuditResponse};
 use super::models::*;
-use crate::path_security::validate_and_resolve_path;
+use crate::path_security::{is_write_allowed, validate_and_resolve_path};
 
 fn client_ip(headers: &HeaderMap, conn: &ConnectInfo<SocketAddr>, proxy_protocol: bool) -> String {
     if proxy_protocol {
@@ -218,6 +218,18 @@ pub async fn upload_files(
             }
         };
 
+        if !state.config.write_config.allowed_patterns.is_empty()
+            && !is_write_allowed(&dest, root, &state.config.write_config)
+        {
+            errors.push(format!("{}: not in allowed write patterns", relative));
+            continue;
+        }
+
+        if dest.exists() && !state.config.write_config.allow_overwrite {
+            errors.push(format!("{}: file exists and overwrite is disabled", relative));
+            continue;
+        }
+
         if let Some(parent) = dest.parent()
             && let Err(e) = fs::create_dir_all(parent).await
         {
@@ -317,6 +329,12 @@ pub async fn delete_file(
         Ok(p) => p,
         Err(e) => return api_error(StatusCode::BAD_REQUEST, e.to_string()),
     };
+
+    if !state.config.write_config.allowed_patterns.is_empty()
+        && !is_write_allowed(&file_path, &state.config.root_dir, &state.config.write_config)
+    {
+        return api_error(StatusCode::FORBIDDEN, "Path not in allowed write patterns");
+    }
 
     let meta = match fs::metadata(&file_path).await {
         Ok(m) => m,

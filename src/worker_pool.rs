@@ -496,13 +496,20 @@ async fn batch_recv_packets_internal(
 
 #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
 async fn batch_recv_packets_internal(
-    _socket: &UdpSocket,
+    socket: &UdpSocket,
     _batch_size: usize,
-    _timeout_us: u64,
+    timeout_us: u64,
 ) -> Result<Vec<(Vec<u8>, SocketAddr)>> {
-    Err(TftpError::Tftp(
-        "recvmmsg not supported on this platform".into(),
-    ))
+    let mut buf = vec![0u8; crate::MAX_PACKET_SIZE];
+    let timeout = tokio::time::Duration::from_micros(timeout_us);
+    match tokio::time::timeout(timeout, socket.recv_from(&mut buf)).await {
+        Ok(Ok((n, addr))) => {
+            buf.truncate(n);
+            Ok(vec![(buf, addr)])
+        }
+        Ok(Err(e)) => Err(TftpError::Tftp(format!("recv_from error: {}", e))),
+        Err(_) => Ok(Vec::new()),
+    }
 }
 
 /// Sender thread: Batch send outgoing packets
@@ -759,10 +766,10 @@ async fn handle_read_request_worker(
     );
 
     // Validate and resolve file path (prevent directory traversal)
-    let file_path = crate::TftpServer::validate_and_resolve_path(root_dir, &filename)?;
+    let file_path = crate::path_security::validate_and_resolve_path(root_dir, &filename)?;
 
     // Negotiate options
-    let default_windowsize = config.performance.platform.batch.max_batch_size;
+    let default_windowsize = config.performance.default_windowsize;
     let mut options = TftpOptions {
         windowsize: default_windowsize,
         ..TftpOptions::default()
@@ -857,7 +864,7 @@ async fn handle_write_request_worker(
     }
 
     // Validate and resolve file path
-    let file_path = crate::TftpServer::validate_and_resolve_path(root_dir, &filename)?;
+    let file_path = crate::path_security::validate_and_resolve_path(root_dir, &filename)?;
 
     // Check if file exists
     let file_exists = tokio::fs::metadata(&file_path).await.is_ok();
@@ -868,7 +875,7 @@ async fn handle_write_request_worker(
     }
 
     // Negotiate options
-    let default_windowsize = config.performance.platform.batch.max_batch_size;
+    let default_windowsize = config.performance.default_windowsize;
     let mut options = TftpOptions {
         windowsize: default_windowsize,
         ..TftpOptions::default()
@@ -1053,12 +1060,15 @@ async fn batch_send_packets_internal(
 
 #[cfg(not(any(target_os = "linux", target_os = "freebsd")))]
 async fn batch_send_packets_internal(
-    _socket: &UdpSocket,
-    _packets: &[OutgoingPacket],
+    socket: &UdpSocket,
+    packets: &[OutgoingPacket],
 ) -> Result<usize> {
-    Err(TftpError::Tftp(
-        "sendmmsg not supported on this platform".into(),
-    ))
+    let mut sent = 0;
+    for pkt in packets {
+        socket.send_to(&pkt.data, pkt.addr).await?;
+        sent += 1;
+    }
+    Ok(sent)
 }
 
 /// Helper: Convert SockaddrStorage to std::net::SocketAddr
