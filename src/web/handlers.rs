@@ -14,13 +14,17 @@ use super::audit::{AuditQuery, AuditResponse};
 use super::models::*;
 use crate::path_security::validate_and_resolve_path;
 
-fn client_ip(headers: &HeaderMap, conn: &ConnectInfo<SocketAddr>) -> String {
-    headers
-        .get("x-forwarded-for")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|s| s.split(',').next())
-        .map(|s| s.trim().to_string())
-        .unwrap_or_else(|| conn.0.ip().to_string())
+fn client_ip(headers: &HeaderMap, conn: &ConnectInfo<SocketAddr>, proxy_protocol: bool) -> String {
+    if proxy_protocol {
+        conn.0.ip().to_string()
+    } else {
+        headers
+            .get("x-forwarded-for")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|s| s.split(',').next())
+            .map(|s| s.trim().to_string())
+            .unwrap_or_else(|| conn.0.ip().to_string())
+    }
 }
 
 fn api_error(status: StatusCode, msg: impl Into<String>) -> Response {
@@ -174,7 +178,11 @@ pub async fn upload_files(
     if let Err(e) = require_write(&state) {
         return e;
     }
-    let ip = client_ip(&headers, &ConnectInfo(addr));
+    let ip = client_ip(
+        &headers,
+        &ConnectInfo(addr),
+        state.config.web.proxy_protocol,
+    );
     let target_dir = query.path.as_deref().unwrap_or("");
     let root = &state.config.root_dir;
 
@@ -287,7 +295,11 @@ pub async fn delete_file(
     if let Err(e) = require_write(&state) {
         return e;
     }
-    let ip = client_ip(&headers, &ConnectInfo(addr));
+    let ip = client_ip(
+        &headers,
+        &ConnectInfo(addr),
+        state.config.web.proxy_protocol,
+    );
     let req_path = match query.path.as_deref() {
         Some(p) if !p.is_empty() => p,
         _ => return api_error(StatusCode::BAD_REQUEST, "path is required"),
@@ -348,7 +360,11 @@ pub async fn create_directory(
     if let Err(e) = require_write(&state) {
         return e;
     }
-    let ip = client_ip(&headers, &ConnectInfo(addr));
+    let ip = client_ip(
+        &headers,
+        &ConnectInfo(addr),
+        state.config.web.proxy_protocol,
+    );
     let req_path = match query.path.as_deref() {
         Some(p) if !p.is_empty() => p,
         _ => return api_error(StatusCode::BAD_REQUEST, "path is required"),

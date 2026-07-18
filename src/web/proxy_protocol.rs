@@ -1,4 +1,5 @@
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
+use std::time::Duration;
 
 use tokio::io::AsyncReadExt;
 use tokio::net::TcpStream;
@@ -6,11 +7,30 @@ use tracing::warn;
 
 const V2_SIGNATURE: &[u8; 12] = b"\r\n\r\n\x00\r\nQUIT\n";
 const V1_PREFIX: &[u8; 6] = b"PROXY ";
+const HEADER_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_V2_ADDR_LEN: usize = 512;
 
 pub async fn read_proxy_header(stream: &mut TcpStream) -> Option<SocketAddr> {
+    match tokio::time::timeout(HEADER_TIMEOUT, read_proxy_header_inner(stream)).await {
+        Ok(result) => result,
+        Err(_) => {
+            warn!("PROXY protocol header read timed out");
+            None
+        }
+    }
+}
+
+async fn read_proxy_header_inner(stream: &mut TcpStream) -> Option<SocketAddr> {
     let mut peek = [0u8; 12];
-    if stream.peek(&mut peek).await.ok()? < 12 {
-        return None;
+    loop {
+        let n = stream.peek(&mut peek).await.ok()?;
+        if n == 0 {
+            return None;
+        }
+        if n >= 12 {
+            break;
+        }
+        tokio::task::yield_now().await;
     }
 
     if &peek == V2_SIGNATURE {
@@ -34,43 +54,50 @@ async fn read_v2(stream: &mut TcpStream) -> Option<SocketAddr> {
     let version = ver_cmd >> 4;
     if version != 2 {
         warn!("Unsupported PROXY protocol version: {}", version);
-        let mut discard = vec![0u8; len];
-        let _ = stream.read_exact(&mut discard).await;
+        discard(stream, len).await;
+        return None;
+    }
+
+    if len > MAX_V2_ADDR_LEN {
+        warn!("PROXY protocol v2 address length too large: {}", len);
+        discard(stream, len).await;
         return None;
     }
 
     let command = ver_cmd & 0x0F;
-    if command == 0 {
-        // LOCAL command — health check, no real address
-        let mut discard = vec![0u8; len];
-        let _ = stream.read_exact(&mut discard).await;
+    if command != 1 {
+        discard(stream, len).await;
         return None;
     }
 
     let addr_family = fam_proto >> 4;
     match addr_family {
         1 => {
-            // IPv4
+            // IPv4: 4+4 bytes addrs + 2+2 bytes ports = 12
             if len < 12 {
-                let mut discard = vec![0u8; len];
-                let _ = stream.read_exact(&mut discard).await;
+                discard(stream, len).await;
                 return None;
             }
-            let mut addr_data = vec![0u8; len];
+            let mut addr_data = [0u8; 12];
             stream.read_exact(&mut addr_data).await.ok()?;
+            if len > 12 {
+                discard(stream, len - 12).await;
+            }
             let src_ip = Ipv4Addr::new(addr_data[0], addr_data[1], addr_data[2], addr_data[3]);
             let src_port = u16::from_be_bytes([addr_data[8], addr_data[9]]);
             Some(SocketAddr::new(IpAddr::V4(src_ip), src_port))
         }
         2 => {
-            // IPv6
+            // IPv6: 16+16 bytes addrs + 2+2 bytes ports = 36
             if len < 36 {
-                let mut discard = vec![0u8; len];
-                let _ = stream.read_exact(&mut discard).await;
+                discard(stream, len).await;
                 return None;
             }
-            let mut addr_data = vec![0u8; len];
+            let mut addr_data = [0u8; 36];
             stream.read_exact(&mut addr_data).await.ok()?;
+            if len > 36 {
+                discard(stream, len - 36).await;
+            }
             let mut octets = [0u8; 16];
             octets.copy_from_slice(&addr_data[..16]);
             let src_ip = Ipv6Addr::from(octets);
@@ -78,10 +105,21 @@ async fn read_v2(stream: &mut TcpStream) -> Option<SocketAddr> {
             Some(SocketAddr::new(IpAddr::V6(src_ip), src_port))
         }
         _ => {
-            let mut discard = vec![0u8; len];
-            let _ = stream.read_exact(&mut discard).await;
+            discard(stream, len).await;
             None
         }
+    }
+}
+
+async fn discard(stream: &mut TcpStream, len: usize) {
+    let mut remaining = len;
+    let mut buf = [0u8; 256];
+    while remaining > 0 {
+        let to_read = remaining.min(buf.len());
+        if stream.read_exact(&mut buf[..to_read]).await.is_err() {
+            break;
+        }
+        remaining -= to_read;
     }
 }
 
