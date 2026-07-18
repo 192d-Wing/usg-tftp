@@ -2,6 +2,33 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.16] - 2026-07-18
+
+### Fixed
+
+- NETASCII streaming: spillover buffer now drains all full blocks per iteration
+  (was growing unboundedly and sending oversized packets at EOF)
+- Empty final DATA block now sent correctly in streaming path when windowsize > 1
+  and file size is an exact multiple of block_size
+- Block number wrapping: ACK and DATA handling uses wrapping-aware u16 arithmetic
+  for transfers exceeding 65535 blocks
+- NETASCII encoding: bare CR now correctly converts to CR+NUL per RFC 854
+  (was CR+LF); CR+NUL decodes back to CR
+- `send_with_retry` now actually retries with backoff (was single-shot)
+- `tsize` pre-allocation capped to prevent OOM from malicious option values
+- Web UI upload/delete handlers now enforce `allowed_patterns` and `allow_overwrite`
+- Worker pool: fixed `default_windowsize` config, added recv/send fallbacks for
+  non-Linux/FreeBSD platforms
+- Path validation: aligned to per-segment `..` check (substring match was
+  rejecting valid filenames containing `..` like `backup..2024.bin`)
+- `server.rs`: fixed missing closing braces in WRQ and ACK handlers that
+  prevented compilation
+
+### Changed
+
+- Worker pool now uses `path_security::validate_and_resolve_path` instead of
+  the stub `TftpServer::validate_and_resolve_path`
+
 ## [0.1.15] - 2026-07-18
 
 ### Fixed

@@ -6,6 +6,7 @@ mod buffer_pool;
 mod config;
 mod error;
 mod multicast;
+mod path_security;
 mod worker_pool;
 
 use audit::AuditLogger;
@@ -546,9 +547,9 @@ impl TransferMode {
                             // CR+LF sequence - add CR, LF will be handled in next iteration
                             result.push(b'\r');
                         } else {
-                            // Bare CR - convert to CR+LF
+                            // Bare CR → CR+NUL per RFC 854
                             result.push(b'\r');
-                            result.push(b'\n');
+                            result.push(b'\0');
                         }
 
                         last_copy = idx + 1;
@@ -1793,6 +1794,14 @@ impl TftpServer {
             }
         }
 
+        // RFC 1350: file size was exact multiple of block_size — send empty final DATA
+        let mut data_packet = BytesMut::with_capacity(4);
+        data_packet.put_u16(TftpOpcode::Data as u16);
+        data_packet.put_u16(block_num);
+        socket.send(&data_packet).await?;
+        Self::wait_for_ack_with_duplicate_handling(socket, block_num, timeout, &data_packet)
+            .await?;
+
         Ok(())
     }
 
@@ -1842,7 +1851,7 @@ impl TftpServer {
         let mut block_num: u16 = 1;
         let mut bytes_transferred: u64 = 0;
         let mut read_buffer = vec![0u8; block_size];
-        let mut netascii_buffer = Vec::new();
+        let mut netascii_spillover: Vec<u8> = Vec::new();
         let mut eof_reached = false;
 
         // RFC 7440: Sliding window transmission for streaming
@@ -1853,43 +1862,101 @@ impl TftpServer {
 
             // Build a window of packets by reading from file
             while blocks_in_window < windowsize && !eof_reached {
+                // Drain pending NETASCII spillover before reading more from file
+                if mode == TransferMode::Netascii && netascii_spillover.len() >= block_size {
+                    let rest = netascii_spillover.split_off(block_size);
+                    let block_data = std::mem::replace(&mut netascii_spillover, rest);
+                    let mut data_packet = BytesMut::with_capacity(4 + block_size);
+                    data_packet.put_u16(TftpOpcode::Data as u16);
+                    data_packet.put_u16(block_num);
+                    data_packet.put_slice(&block_data);
+                    window_packets.push((block_num, data_packet.freeze(), block_size, false));
+                    block_num = block_num.wrapping_add(1);
+                    blocks_in_window += 1;
+                    continue;
+                }
+
                 let bytes_read = file.read(&mut read_buffer).await?;
 
                 if bytes_read == 0 {
                     eof_reached = true;
+                    // Drain remaining NETASCII spillover in block_size chunks
+                    while !netascii_spillover.is_empty() && blocks_in_window < windowsize {
+                        let block_data = if netascii_spillover.len() > block_size {
+                            let rest = netascii_spillover.split_off(block_size);
+                            std::mem::replace(&mut netascii_spillover, rest)
+                        } else {
+                            std::mem::take(&mut netascii_spillover)
+                        };
+                        let is_final = block_data.len() < block_size;
+                        let mut data_packet = BytesMut::with_capacity(4 + block_data.len());
+                        data_packet.put_u16(TftpOpcode::Data as u16);
+                        data_packet.put_u16(block_num);
+                        data_packet.put_slice(&block_data);
+                        window_packets.push((
+                            block_num,
+                            data_packet.freeze(),
+                            block_data.len(),
+                            is_final,
+                        ));
+                        block_num = block_num.wrapping_add(1);
+                        blocks_in_window += 1;
+                        if is_final {
+                            break;
+                        }
+                    }
                     break;
                 }
 
-                // Determine block data based on mode
-                let block_data = if mode == TransferMode::Netascii {
-                    netascii_buffer.clear();
-                    netascii_buffer.extend_from_slice(
-                        TransferMode::convert_to_netascii(&read_buffer[..bytes_read]).as_slice(),
-                    );
-                    netascii_buffer.clone()
+                if mode == TransferMode::Netascii {
+                    netascii_spillover.extend_from_slice(&TransferMode::convert_to_netascii(
+                        &read_buffer[..bytes_read],
+                    ));
+                    if netascii_spillover.len() >= block_size {
+                        let rest = netascii_spillover.split_off(block_size);
+                        let block_data = std::mem::replace(&mut netascii_spillover, rest);
+                        let mut data_packet = BytesMut::with_capacity(4 + block_size);
+                        data_packet.put_u16(TftpOpcode::Data as u16);
+                        data_packet.put_u16(block_num);
+                        data_packet.put_slice(&block_data);
+                        window_packets.push((block_num, data_packet.freeze(), block_size, false));
+                        block_num = block_num.wrapping_add(1);
+                        blocks_in_window += 1;
+                    }
                 } else {
-                    read_buffer[..bytes_read].to_vec()
-                };
-
-                let mut data_packet = BytesMut::with_capacity(4 + block_data.len());
-                data_packet.put_u16(TftpOpcode::Data as u16);
-                data_packet.put_u16(block_num);
-                data_packet.put_slice(&block_data);
-
-                let is_final = bytes_read < block_size;
-                window_packets.push((block_num, data_packet.freeze(), block_data.len(), is_final));
-
-                block_num = block_num.wrapping_add(1);
-                blocks_in_window += 1;
-
-                if is_final {
-                    eof_reached = true;
-                    break;
+                    let block_data = read_buffer[..bytes_read].to_vec();
+                    let is_final = block_data.len() < block_size;
+                    let mut data_packet = BytesMut::with_capacity(4 + block_data.len());
+                    data_packet.put_u16(TftpOpcode::Data as u16);
+                    data_packet.put_u16(block_num);
+                    data_packet.put_slice(&block_data);
+                    window_packets.push((
+                        block_num,
+                        data_packet.freeze(),
+                        block_data.len(),
+                        is_final,
+                    ));
+                    block_num = block_num.wrapping_add(1);
+                    blocks_in_window += 1;
+                    if is_final {
+                        eof_reached = true;
+                    }
                 }
             }
 
-            // If no packets in window, we're done
+            // If no packets in window, we reached EOF after a full block — send empty final DATA
             if window_packets.is_empty() {
+                let mut data_packet = BytesMut::with_capacity(4);
+                data_packet.put_u16(TftpOpcode::Data as u16);
+                data_packet.put_u16(block_num);
+                socket.send(&data_packet).await?;
+                Self::wait_for_ack_with_duplicate_handling(
+                    socket,
+                    block_num,
+                    timeout,
+                    &data_packet,
+                )
+                .await?;
                 break;
             }
 
@@ -1964,6 +2031,18 @@ impl TftpServer {
             }
 
             if eof_reached {
+                // RFC 1350: all window packets were full-size — send empty final DATA
+                let mut data_packet = BytesMut::with_capacity(4);
+                data_packet.put_u16(TftpOpcode::Data as u16);
+                data_packet.put_u16(block_num);
+                socket.send(&data_packet).await?;
+                Self::wait_for_ack_with_duplicate_handling(
+                    socket,
+                    block_num,
+                    timeout,
+                    &data_packet,
+                )
+                .await?;
                 break;
             }
         }
@@ -2035,13 +2114,18 @@ impl TftpServer {
         }
 
         // Receive file data blocks
-        // Performance optimization: Pre-allocate buffer with expected size if available
-        let mut received_data = if let Some(expected_size) = options.transfer_size {
-            Vec::with_capacity(expected_size as usize)
+        // Cap pre-allocation to max_file_size or 64MB to prevent OOM from malicious tsize
+        let prealloc_cap = if let Some(expected_size) = options.transfer_size {
+            let cap = expected_size as usize;
+            if max_file_size_bytes > 0 {
+                cap.min(max_file_size_bytes as usize)
+            } else {
+                cap.min(64 * 1024 * 1024)
+            }
         } else {
-            // Default pre-allocation for 1MB
-            Vec::with_capacity(1_048_576)
+            1_048_576
         };
+        let mut received_data = Vec::with_capacity(prealloc_cap);
         let mut expected_block: u16 = 1;
         let mut buf = vec![0u8; MAX_PACKET_SIZE];
 
@@ -2084,28 +2168,29 @@ impl TftpServer {
 
                     let block_num = data_bytes.get_u16();
 
-                    // Handle block number
-                    if block_num < expected_block {
-                        // Duplicate block - re-send ACK
-                        debug!("Received duplicate block {}", block_num);
-                        let mut ack_packet = BytesMut::with_capacity(4);
-                        ack_packet.put_u16(TftpOpcode::Ack as u16);
-                        ack_packet.put_u16(block_num);
-                        socket.send(&ack_packet).await?;
-                        continue;
-                    } else if block_num > expected_block {
-                        // Out of order - error
-                        warn!(
-                            "Block mismatch: expected {}, got {}",
-                            expected_block, block_num
-                        );
-                        Self::send_error_on_socket(
-                            &socket,
-                            TftpErrorCode::IllegalOperation,
-                            "Out of order block",
-                        )
-                        .await?;
-                        return Ok(());
+                    // Handle block number (wrapping-aware for transfers > 65535 blocks)
+                    if block_num != expected_block {
+                        let behind = expected_block.wrapping_sub(block_num);
+                        if behind > 0 && behind < 32768 {
+                            debug!("Received duplicate block {}", block_num);
+                            let mut ack_packet = BytesMut::with_capacity(4);
+                            ack_packet.put_u16(TftpOpcode::Ack as u16);
+                            ack_packet.put_u16(block_num);
+                            socket.send(&ack_packet).await?;
+                            continue;
+                        } else {
+                            warn!(
+                                "Block mismatch: expected {}, got {}",
+                                expected_block, block_num
+                            );
+                            Self::send_error_on_socket(
+                                &socket,
+                                TftpErrorCode::IllegalOperation,
+                                "Out of order block",
+                            )
+                            .await?;
+                            return Ok(());
+                        }
                     }
 
                     // Get data from packet
@@ -2148,7 +2233,8 @@ impl TftpServer {
                     // 1. The last block in a window, OR
                     // 2. The final block (< block_size)
                     let is_final_block = data_len < block_size;
-                    let blocks_in_current_window = (block_num - 1) % windowsize as u16 + 1;
+                    let blocks_in_current_window =
+                        block_num.wrapping_sub(1) % windowsize as u16 + 1;
                     let should_ack =
                         blocks_in_current_window == windowsize as u16 || is_final_block;
 
@@ -2324,19 +2410,25 @@ impl TftpServer {
         let mut i = 0;
 
         while i < data.len() {
-            let byte = data[i];
-
-            if byte == b'\r' && i + 1 < data.len() && data[i + 1] == b'\n' {
-                // CR+LF sequence - convert to LF
-                result.push(b'\n');
-                i += 2;
-            } else if byte == b'\r' {
-                // Bare CR - convert to LF
-                result.push(b'\n');
-                i += 1;
+            if data[i] == b'\r' && i + 1 < data.len() {
+                match data[i + 1] {
+                    b'\n' => {
+                        // CR+LF → LF (line ending)
+                        result.push(b'\n');
+                        i += 2;
+                    }
+                    b'\0' => {
+                        // CR+NUL → CR (bare carriage return per RFC 854)
+                        result.push(b'\r');
+                        i += 2;
+                    }
+                    _ => {
+                        result.push(data[i]);
+                        i += 1;
+                    }
+                }
             } else {
-                // Regular character - copy as-is
-                result.push(byte);
+                result.push(data[i]);
                 i += 1;
             }
         }
@@ -2403,24 +2495,29 @@ impl TftpServer {
         false
     }
 
-    // Send packet with automatic retries
     async fn send_with_retry(
         socket: &UdpSocket,
         packet: &[u8],
         _timeout: tokio::time::Duration,
     ) -> Result<()> {
-        if let Some(attempt) = (0..MAX_RETRIES).next() {
-            socket.send(packet).await?;
-
-            // For DATA/OACK packets, we'll wait for ACK in a separate function
-            // This just ensures the send succeeded
-            if attempt > 0 {
-                debug!("Retransmission attempt {}", attempt);
+        for attempt in 0..MAX_RETRIES {
+            match socket.send(packet).await {
+                Ok(_) => return Ok(()),
+                Err(e) => {
+                    if attempt + 1 < MAX_RETRIES {
+                        debug!(
+                            "Send failed (attempt {}/{}): {}",
+                            attempt + 1,
+                            MAX_RETRIES,
+                            e
+                        );
+                        tokio::time::sleep(tokio::time::Duration::from_millis(100)).await;
+                    } else {
+                        return Err(e.into());
+                    }
+                }
             }
-
-            return Ok(());
         }
-
         Err(TftpError::Tftp("Max retries exceeded".to_string()))
     }
 
@@ -2465,23 +2562,25 @@ impl TftpServer {
 
                 let ack_block = ack_bytes.get_u16();
 
-                // RFC 1350: Check ACK block number
+                // RFC 1350: Check ACK block number (wrapping-aware for transfers > 65535 blocks)
                 if ack_block == expected_block {
-                    // Correct ACK
                     Ok(true)
-                } else if ack_block < expected_block {
-                    // Duplicate ACK - indicates packet loss, retransmit
-                    debug!(
-                        "Received duplicate ACK for block {} (expected {})",
-                        ack_block, expected_block
-                    );
-                    Ok(false)
                 } else {
-                    warn!(
-                        "ACK mismatch: expected {}, got {}",
-                        expected_block, ack_block
-                    );
-                    Err(TftpError::Tftp("ACK out of sequence".to_string()))
+                    // Wrapping-aware distance: how far behind is ack_block?
+                    let behind = expected_block.wrapping_sub(ack_block);
+                    if behind > 0 && behind < 32768 {
+                        debug!(
+                            "Received duplicate ACK for block {} (expected {})",
+                            ack_block, expected_block
+                        );
+                        Ok(false)
+                    } else {
+                        warn!(
+                            "ACK mismatch: expected {}, got {}",
+                            expected_block, ack_block
+                        );
+                        Err(TftpError::Tftp("ACK out of sequence".to_string()))
+                    }
                 }
             }
             Ok(Err(e)) => {
@@ -2643,7 +2742,7 @@ impl TftpServer {
         // NIST SI-10: Normalize the filename and check for directory traversal
         // STIG V-222603: Prevent path traversal attacks (.., ./, etc.)
         let filename = filename.replace('\\', "/");
-        if filename.contains("..") {
+        if filename.split('/').any(|seg| seg == "..") {
             return Err(TftpError::Tftp("Invalid filename".to_string()));
         }
 
