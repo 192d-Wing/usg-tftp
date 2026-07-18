@@ -50,12 +50,26 @@ async fn serve_with_proxy_protocol(
     use hyper_util::rt::{TokioExecutor, TokioIo};
     use hyper_util::server::conn::auto::Builder;
 
+    let mut consecutive_errors = 0u32;
     loop {
-        let (mut stream, peer_addr) = match listener.accept().await {
-            Ok(conn) => conn,
+        let (mut stream, _peer_addr) = match listener.accept().await {
+            Ok(conn) => {
+                consecutive_errors = 0;
+                conn
+            }
             Err(e) => {
-                tracing::warn!("Accept error (continuing): {}", e);
-                tokio::time::sleep(Duration::from_millis(50)).await;
+                consecutive_errors += 1;
+                if consecutive_errors >= 10 {
+                    tracing::error!(
+                        "Accept failing persistently ({}x): {}",
+                        consecutive_errors,
+                        e
+                    );
+                } else {
+                    tracing::warn!("Accept error (continuing): {}", e);
+                }
+                let backoff = Duration::from_millis(50 * consecutive_errors.min(20) as u64);
+                tokio::time::sleep(backoff).await;
                 continue;
             }
         };
@@ -63,9 +77,13 @@ async fn serve_with_proxy_protocol(
         let tls_acceptor = tls_acceptor.clone();
 
         tokio::spawn(async move {
-            let real_addr = proxy_protocol::read_proxy_header(&mut stream)
-                .await
-                .unwrap_or(peer_addr);
+            let real_addr = match proxy_protocol::read_proxy_header(&mut stream).await {
+                Some(addr) => addr,
+                None => {
+                    tracing::debug!("PROXY header invalid or timed out, dropping connection");
+                    return;
+                }
+            };
 
             let serve = |io: TokioIo<_>| async move {
                 let service = hyper::service::service_fn(move |mut req| {
@@ -264,7 +282,13 @@ fn spawn_acme_event_loop<EC: 'static + std::fmt::Debug, EA: 'static + std::fmt::
 fn load_certs(path: &str) -> anyhow::Result<Vec<rustls::pki_types::CertificateDer<'static>>> {
     let data = std::fs::read(path)?;
     let certs: Vec<_> = rustls_pemfile::certs(&mut &data[..])
-        .filter_map(|r| r.ok())
+        .filter_map(|r| match r {
+            Ok(cert) => Some(cert),
+            Err(e) => {
+                tracing::warn!("Skipping invalid certificate entry in {}: {}", path, e);
+                None
+            }
+        })
         .collect();
     if certs.is_empty() {
         anyhow::bail!("No certificates found in {}", path);

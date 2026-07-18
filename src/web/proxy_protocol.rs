@@ -10,6 +10,10 @@ const V1_PREFIX: &[u8; 6] = b"PROXY ";
 const HEADER_TIMEOUT: Duration = Duration::from_secs(5);
 const MAX_V2_ADDR_LEN: usize = 512;
 
+/// Read and parse a PROXY protocol header from the stream.
+///
+/// Returns `Some(addr)` on success. Returns `None` if parsing fails or times out —
+/// in either case bytes have been consumed and the caller MUST close the connection.
 pub async fn read_proxy_header(stream: &mut TcpStream) -> Option<SocketAddr> {
     match tokio::time::timeout(HEADER_TIMEOUT, read_proxy_header_inner(stream)).await {
         Ok(result) => result,
@@ -21,22 +25,13 @@ pub async fn read_proxy_header(stream: &mut TcpStream) -> Option<SocketAddr> {
 }
 
 async fn read_proxy_header_inner(stream: &mut TcpStream) -> Option<SocketAddr> {
-    let mut peek = [0u8; 12];
-    loop {
-        let n = stream.peek(&mut peek).await.ok()?;
-        if n == 0 {
-            return None;
-        }
-        if n >= 12 {
-            break;
-        }
-        tokio::task::yield_now().await;
-    }
+    let mut initial = [0u8; 12];
+    stream.read_exact(&mut initial).await.ok()?;
 
-    if &peek == V2_SIGNATURE {
+    if initial == *V2_SIGNATURE {
         read_v2(stream).await
-    } else if peek[..6] == *V1_PREFIX {
-        read_v1(stream).await
+    } else if initial[..6] == *V1_PREFIX {
+        read_v1(stream, &initial).await
     } else {
         warn!("PROXY protocol enabled but no valid header received");
         None
@@ -44,12 +39,12 @@ async fn read_proxy_header_inner(stream: &mut TcpStream) -> Option<SocketAddr> {
 }
 
 async fn read_v2(stream: &mut TcpStream) -> Option<SocketAddr> {
-    let mut header = [0u8; 16];
-    stream.read_exact(&mut header).await.ok()?;
+    let mut rest = [0u8; 4];
+    stream.read_exact(&mut rest).await.ok()?;
 
-    let ver_cmd = header[12];
-    let fam_proto = header[13];
-    let len = u16::from_be_bytes([header[14], header[15]]) as usize;
+    let ver_cmd = rest[0];
+    let fam_proto = rest[1];
+    let len = u16::from_be_bytes([rest[2], rest[3]]) as usize;
 
     let version = ver_cmd >> 4;
     if version != 2 {
@@ -73,7 +68,6 @@ async fn read_v2(stream: &mut TcpStream) -> Option<SocketAddr> {
     let addr_family = fam_proto >> 4;
     match addr_family {
         1 => {
-            // IPv4: 4+4 bytes addrs + 2+2 bytes ports = 12
             if len < 12 {
                 discard(stream, len).await;
                 return None;
@@ -88,7 +82,6 @@ async fn read_v2(stream: &mut TcpStream) -> Option<SocketAddr> {
             Some(SocketAddr::new(IpAddr::V4(src_ip), src_port))
         }
         2 => {
-            // IPv6: 16+16 bytes addrs + 2+2 bytes ports = 36
             if len < 36 {
                 discard(stream, len).await;
                 return None;
@@ -123,24 +116,44 @@ async fn discard(stream: &mut TcpStream, len: usize) {
     }
 }
 
-async fn read_v1(stream: &mut TcpStream) -> Option<SocketAddr> {
-    let mut buf = Vec::with_capacity(108);
-    loop {
-        let mut byte = [0u8; 1];
-        stream.read_exact(&mut byte).await.ok()?;
-        buf.push(byte[0]);
-        if byte[0] == b'\n' {
-            break;
-        }
-        if buf.len() > 107 {
-            warn!("PROXY protocol v1 header too long");
-            return None;
+async fn read_v1(stream: &mut TcpStream, initial: &[u8; 12]) -> Option<SocketAddr> {
+    let mut header = Vec::with_capacity(108);
+    header.extend_from_slice(initial);
+
+    // Optimistic path: peek for the rest of the line in one shot.
+    // PROXY v1 headers arrive atomically in practice, so this almost always succeeds.
+    let mut peek_buf = [0u8; 96];
+    let n = stream.peek(&mut peek_buf).await.ok()?;
+    if n == 0 {
+        return None;
+    }
+
+    if let Some(pos) = peek_buf[..n].iter().position(|&b| b == b'\n') {
+        let to_read = pos + 1;
+        let mut buf = vec![0u8; to_read];
+        stream.read_exact(&mut buf).await.ok()?;
+        header.extend_from_slice(&buf);
+    } else if header.len() + n > 107 {
+        warn!("PROXY protocol v1 header too long");
+        return None;
+    } else {
+        // Rare fragmentation: fall back to byte-by-byte (properly awaits readiness)
+        loop {
+            let mut byte = [0u8; 1];
+            stream.read_exact(&mut byte).await.ok()?;
+            header.push(byte[0]);
+            if byte[0] == b'\n' {
+                break;
+            }
+            if header.len() > 107 {
+                warn!("PROXY protocol v1 header too long");
+                return None;
+            }
         }
     }
 
-    let line = String::from_utf8_lossy(&buf);
+    let line = String::from_utf8_lossy(&header);
     let parts: Vec<&str> = line.trim().split(' ').collect();
-    // PROXY TCP4/TCP6 src_addr dst_addr src_port dst_port
     if parts.len() < 6 {
         return None;
     }
