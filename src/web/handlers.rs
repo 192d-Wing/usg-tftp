@@ -6,7 +6,7 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Json, Response};
 use tokio::fs;
 use tokio_util::io::ReaderStream;
-use tracing::{error, info};
+use tracing::{error, info, warn};
 
 use super::AppState;
 use super::models::*;
@@ -60,10 +60,21 @@ pub async fn list_files(State(state): State<AppState>, Query(query): Query<FileQ
     };
 
     let mut entries = Vec::new();
-    while let Ok(Some(entry)) = read_dir.next_entry().await {
+    loop {
+        let entry = match read_dir.next_entry().await {
+            Ok(Some(entry)) => entry,
+            Ok(None) => break,
+            Err(e) => {
+                warn!("Error reading directory entry: {}", e);
+                continue;
+            }
+        };
         let meta = match entry.metadata().await {
             Ok(m) => m,
-            Err(_) => continue,
+            Err(e) => {
+                warn!("Failed to read metadata for {:?}: {}", entry.file_name(), e);
+                continue;
+            }
         };
         let name = entry.file_name().to_string_lossy().to_string();
         if name.starts_with('.') || name == "lost+found" {
@@ -155,7 +166,16 @@ pub async fn upload_files(
     let mut uploaded = Vec::new();
     let mut errors = Vec::new();
 
-    while let Ok(Some(mut field)) = multipart.next_field().await {
+    loop {
+        let mut field = match multipart.next_field().await {
+            Ok(Some(field)) => field,
+            Ok(None) => break,
+            Err(e) => {
+                warn!("Error reading multipart field: {}", e);
+                errors.push(format!("Multipart read error: {}", e));
+                break;
+            }
+        };
         let relative = field.file_name().map(|s| s.to_string()).unwrap_or_default();
         if relative.is_empty() {
             continue;
@@ -193,16 +213,26 @@ pub async fn upload_files(
         };
 
         let mut write_err = None;
-        while let Ok(Some(chunk)) = field.chunk().await {
-            if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut tmp_file, &chunk).await {
-                write_err = Some(e);
-                break;
+        loop {
+            match field.chunk().await {
+                Ok(Some(chunk)) => {
+                    if let Err(e) = tokio::io::AsyncWriteExt::write_all(&mut tmp_file, &chunk).await
+                    {
+                        write_err = Some(format!("{}", e));
+                        break;
+                    }
+                }
+                Ok(None) => break,
+                Err(e) => {
+                    write_err = Some(format!("Stream error: {}", e));
+                    break;
+                }
             }
         }
         drop(tmp_file);
 
-        if let Some(e) = write_err {
-            errors.push(format!("{}: {}", relative, e));
+        if let Some(err_msg) = write_err {
+            errors.push(format!("{}: {}", relative, err_msg));
             let _ = fs::remove_file(&tmp_path).await;
             continue;
         }

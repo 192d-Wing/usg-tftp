@@ -516,6 +516,12 @@ webUI:
     # -- Annotations on the web UI Service.
     annotations: {}
 
+    # -- IP family policy for the web UI service.
+    ipFamilyPolicy: ""
+
+    # -- IP families for the web UI service.
+    ipFamilies: []
+
   # -- Ingress configuration for the web UI.
   ingress:
     # -- Enable Ingress for the web UI.
@@ -571,6 +577,13 @@ webUI:
 
     # -- Path to the TLS private key (PEM).
     keyPath: ""
+
+  # -- ACME certificate cache persistence. When enabled, certificates survive
+  # pod restarts and avoid Let's Encrypt rate limits on re-issuance.
+  acmePersistence:
+    enabled: false
+    storageClassName: ""
+    size: 100Mi
 
   # -- Maximum upload size in bytes (default: 500 MB).
   maxUploadBytes: 524288000

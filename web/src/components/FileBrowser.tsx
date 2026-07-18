@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import Table from "@cloudscape-design/components/table";
 import Header from "@cloudscape-design/components/header";
 import Button from "@cloudscape-design/components/button";
@@ -8,6 +8,7 @@ import Box from "@cloudscape-design/components/box";
 import Icon from "@cloudscape-design/components/icon";
 import Link from "@cloudscape-design/components/link";
 import StatusIndicator from "@cloudscape-design/components/status-indicator";
+import Alert from "@cloudscape-design/components/alert";
 import type { FileEntry } from "../api/types";
 import { downloadFile } from "../api/client";
 import FilePreview from "./FilePreview";
@@ -51,10 +52,21 @@ export default function FileBrowser({
 }: FileBrowserProps) {
   const [selectedItems, setSelectedItems] = useState<FileEntry[]>([]);
   const [previewItem, setPreviewItem] = useState<FileEntry | null>(null);
+  const [downloadError, setDownloadError] = useState<string | null>(null);
 
   useEffect(() => {
     setSelectedItems([]);
+    setDownloadError(null);
   }, [files]);
+
+  const handleDownload = useCallback(async (path: string) => {
+    setDownloadError(null);
+    try {
+      await downloadFile(path);
+    } catch (e) {
+      setDownloadError(e instanceof Error ? e.message : "Download failed");
+    }
+  }, []);
 
   const breadcrumbs = [{ text: "Root", href: "" }];
   if (currentPath) {
@@ -116,7 +128,7 @@ export default function FileBrowser({
                 <Button onClick={onCreateFolderClick}>Create folder</Button>
                 {selectedItems.length === 1 && !selectedItems[0].is_dir && (
                   <Button
-                    onClick={() => downloadFile(selectedItems[0].path)}
+                    onClick={() => handleDownload(selectedItems[0].path)}
                   >
                     Download
                   </Button>
@@ -188,11 +200,16 @@ export default function FileBrowser({
           },
         ]}
       />
+      {downloadError && (
+        <Alert type="error" dismissible onDismiss={() => setDownloadError(null)}>
+          {downloadError}
+        </Alert>
+      )}
       {previewItem && (
         <FilePreview
           item={previewItem}
           onDismiss={() => setPreviewItem(null)}
-          onDownload={() => downloadFile(previewItem.path)}
+          onDownload={() => handleDownload(previewItem.path)}
         />
       )}
     </SpaceBetween>

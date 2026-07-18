@@ -30,41 +30,61 @@ function formatBytes(bytes: number): string {
 
 export default function ServerInfo() {
   const [status, setStatus] = useState<ServerStatus | null>(null);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
-    getServerStatus().then(setStatus).catch(() => {});
-    const interval = setInterval(() => {
-      getServerStatus().then(setStatus).catch(() => {});
-    }, 30000);
+    const poll = () => {
+      getServerStatus()
+        .then((s) => {
+          setStatus(s);
+          setError(false);
+        })
+        .catch(() => setError(true));
+    };
+    poll();
+    const interval = setInterval(poll, 30000);
     return () => clearInterval(interval);
   }, []);
 
-  if (!status) return null;
+  if (!status && !error) return null;
+
+  if (error && !status) {
+    return (
+      <Container header={<Header variant="h2">Server Status</Header>}>
+        <StatusIndicator type="error">
+          Unable to reach server
+        </StatusIndicator>
+      </Container>
+    );
+  }
 
   return (
     <Container header={<Header variant="h2">Server Status</Header>}>
       <ColumnLayout columns={4} variant="text-grid">
         <div>
           <Box variant="awsui-key-label">Version</Box>
-          <div>{status.version}</div>
+          <div>{status!.version}</div>
         </div>
         <div>
           <Box variant="awsui-key-label">Uptime</Box>
-          <div>{formatUptime(status.uptime_seconds)}</div>
+          <div>{formatUptime(status!.uptime_seconds)}</div>
         </div>
         <div>
           <Box variant="awsui-key-label">TLS</Box>
           <StatusIndicator
-            type={status.tls_mode === "none" ? "warning" : "success"}
+            type={status!.tls_mode === "none" ? "warning" : "success"}
           >
-            {status.tls_mode}
+            {status!.tls_mode}
           </StatusIndicator>
         </div>
         <div>
           <Box variant="awsui-key-label">Disk</Box>
           <div>
-            {formatBytes(status.disk_available_bytes)} free /{" "}
-            {formatBytes(status.disk_total_bytes)}
+            {error ? (
+              <StatusIndicator type="warning">stale</StatusIndicator>
+            ) : null}
+            {formatBytes(status!.disk_available_bytes)} free /{" "}
+            {formatBytes(status!.disk_total_bytes)}
           </div>
         </div>
       </ColumnLayout>

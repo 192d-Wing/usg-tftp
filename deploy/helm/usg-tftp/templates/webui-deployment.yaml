@@ -103,7 +103,12 @@ spec:
           emptyDir: {}
           {{- end }}
         - name: acme-cache
+          {{- if .Values.webUI.acmePersistence.enabled }}
+          persistentVolumeClaim:
+            claimName: {{ include "usg-tftp.fullname" . }}-acme-cache
+          {{- else }}
           emptyDir: {}
+          {{- end }}
         - name: tmp
           emptyDir: {}
       {{- with .Values.webUI.nodeSelector }}

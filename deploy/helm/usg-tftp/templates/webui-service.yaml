@@ -12,10 +12,10 @@ metadata:
   {{- end }}
 spec:
   type: {{ .Values.webUI.service.type }}
-  {{- with .Values.service.ipFamilyPolicy }}
+  {{- with .Values.webUI.service.ipFamilyPolicy }}
   ipFamilyPolicy: {{ . }}
   {{- end }}
-  {{- with .Values.service.ipFamilies }}
+  {{- with .Values.webUI.service.ipFamilies }}
   ipFamilies:
     {{- toYaml . | nindent 4 }}
   {{- end }}

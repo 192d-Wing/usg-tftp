@@ -4,7 +4,7 @@ use crate::error::{Result, TftpError};
 
 pub fn validate_and_resolve_path(root_dir: &Path, filename: &str) -> Result<PathBuf> {
     let filename = filename.replace('\\', "/");
-    if filename.contains("..") {
+    if filename.split('/').any(|seg| seg == "..") {
         return Err(TftpError::Tftp("Invalid filename".to_string()));
     }
 

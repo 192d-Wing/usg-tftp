@@ -1,0 +1,18 @@
+{{- if and .Values.webUI.enabled .Values.webUI.acmePersistence.enabled }}
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: {{ include "usg-tftp.fullname" . }}-acme-cache
+  labels:
+    {{- include "usg-tftp.labels" . | nindent 4 }}
+    app.kubernetes.io/component: webui
+spec:
+  accessModes:
+    - ReadWriteOnce
+  {{- if .Values.webUI.acmePersistence.storageClassName }}
+  storageClassName: {{ .Values.webUI.acmePersistence.storageClassName }}
+  {{- end }}
+  resources:
+    requests:
+      storage: {{ .Values.webUI.acmePersistence.size }}
+{{- end }}

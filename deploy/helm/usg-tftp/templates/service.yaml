@@ -38,4 +38,5 @@ spec:
       {{- end }}
   selector:
     {{- include "usg-tftp.selectorLabels" . | nindent 4 }}
+    app.kubernetes.io/component: tftp
 {{- end }}

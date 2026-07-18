@@ -23,12 +23,22 @@ export async function listFiles(
 
 export async function downloadFile(path: string): Promise<void> {
   const url = `${BASE}/api/files/download?path=${encodeURIComponent(path)}`;
+  const res = await fetch(url);
+  if (!res.ok) {
+    const body: ApiError = await res.json().catch(() => ({
+      error: `HTTP ${res.status}`,
+    }));
+    throw new Error(body.error);
+  }
+  const blob = await res.blob();
+  const blobUrl = URL.createObjectURL(blob);
   const a = document.createElement("a");
-  a.href = url;
+  a.href = blobUrl;
   a.download = path.split("/").pop() || "download";
   document.body.appendChild(a);
   a.click();
   a.remove();
+  URL.revokeObjectURL(blobUrl);
 }
 
 export interface FileWithPath {
@@ -40,6 +50,7 @@ export async function uploadFiles(
   items: FileWithPath[],
   targetPath: string,
   onProgress?: (uploaded: number, total: number) => void,
+  signal?: AbortSignal,
 ): Promise<UploadResult> {
   const allUploaded: string[] = [];
   const allErrors: string[] = [];
@@ -57,6 +68,7 @@ export async function uploadFiles(
       const res = await fetch(`${BASE}/api/files/upload${params}`, {
         method: "POST",
         body: form,
+        signal,
       });
       const result = await handleResponse<UploadResult>(res);
       allUploaded.push(...result.uploaded);

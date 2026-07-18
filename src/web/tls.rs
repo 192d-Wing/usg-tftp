@@ -84,7 +84,13 @@ async fn serve_acme_tls(
         })?;
         let mut root_store = rustls::RootCertStore::empty();
         let pem_certs: Vec<_> = rustls_pemfile::certs(&mut &ca_pem[..])
-            .filter_map(|r| r.ok())
+            .filter_map(|r| match r {
+                Ok(cert) => Some(cert),
+                Err(e) => {
+                    tracing::warn!("Skipping invalid PEM certificate entry: {}", e);
+                    None
+                }
+            })
             .collect();
         if pem_certs.is_empty() {
             let der_cert = rustls::pki_types::CertificateDer::from(ca_pem);
