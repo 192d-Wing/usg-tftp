@@ -19,7 +19,11 @@ pub async fn serve_https(
     } else {
         info!("TLS disabled, serving HTTP on {}", bind_addr);
         let listener = TcpListener::bind(bind_addr).await?;
-        axum::serve(listener, app).await?;
+        axum::serve(
+            listener,
+            app.into_make_service_with_connect_info::<SocketAddr>(),
+        )
+        .await?;
         Ok(())
     }
 }
@@ -38,7 +42,7 @@ async fn serve_manual_tls(
     .await?;
 
     axum_server::bind_rustls(bind_addr, rustls_config)
-        .serve(app.into_make_service())
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
 
     Ok(())
@@ -134,7 +138,7 @@ async fn serve_acme_tls(
 
     axum_server::bind(bind_addr)
         .acceptor(acceptor)
-        .serve(app.into_make_service())
+        .serve(app.into_make_service_with_connect_info::<SocketAddr>())
         .await?;
 
     Ok(())

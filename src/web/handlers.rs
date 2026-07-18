@@ -1,7 +1,8 @@
+use std::net::SocketAddr;
 use std::path::Path;
 
 use axum::body::Body;
-use axum::extract::{Multipart, Query, State};
+use axum::extract::{ConnectInfo, Multipart, Query, State};
 use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Json, Response};
 use tokio::fs;
@@ -12,6 +13,15 @@ use super::AppState;
 use super::audit::{AuditQuery, AuditResponse};
 use super::models::*;
 use crate::path_security::validate_and_resolve_path;
+
+fn client_ip(headers: &HeaderMap, conn: &ConnectInfo<SocketAddr>) -> String {
+    headers
+        .get("x-forwarded-for")
+        .and_then(|v| v.to_str().ok())
+        .and_then(|s| s.split(',').next())
+        .map(|s| s.trim().to_string())
+        .unwrap_or_else(|| conn.0.ip().to_string())
+}
 
 fn api_error(status: StatusCode, msg: impl Into<String>) -> Response {
     (status, Json(ApiError { error: msg.into() })).into_response()
@@ -156,12 +166,15 @@ pub async fn download_file(
 
 pub async fn upload_files(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Query(query): Query<FileQuery>,
     mut multipart: Multipart,
 ) -> Response {
     if let Err(e) = require_write(&state) {
         return e;
     }
+    let ip = client_ip(&headers, &ConnectInfo(addr));
     let target_dir = query.path.as_deref().unwrap_or("");
     let root = &state.config.root_dir;
 
@@ -248,7 +261,7 @@ pub async fn upload_files(
         let file_size = fs::metadata(&dest).await.map(|m| m.len()).unwrap_or(0);
         state
             .audit_logger
-            .file_uploaded(&full_relative, file_size)
+            .file_uploaded(&full_relative, file_size, &ip)
             .await;
         info!(path = %full_relative, "Web UI file uploaded");
         uploaded.push(full_relative);
@@ -267,12 +280,14 @@ pub async fn upload_files(
 
 pub async fn delete_file(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Query(query): Query<FileQuery>,
     headers: HeaderMap,
 ) -> Response {
     if let Err(e) = require_write(&state) {
         return e;
     }
+    let ip = client_ip(&headers, &ConnectInfo(addr));
     let req_path = match query.path.as_deref() {
         Some(p) if !p.is_empty() => p,
         _ => return api_error(StatusCode::BAD_REQUEST, "path is required"),
@@ -312,7 +327,7 @@ pub async fn delete_file(
         Ok(()) => {
             state
                 .audit_logger
-                .file_deleted(req_path, meta.is_dir())
+                .file_deleted(req_path, meta.is_dir(), &ip)
                 .await;
             info!(path = %req_path, is_dir = meta.is_dir(), "Web UI file deleted");
             StatusCode::NO_CONTENT.into_response()
@@ -326,11 +341,14 @@ pub async fn delete_file(
 
 pub async fn create_directory(
     State(state): State<AppState>,
+    ConnectInfo(addr): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
     Query(query): Query<FileQuery>,
 ) -> Response {
     if let Err(e) = require_write(&state) {
         return e;
     }
+    let ip = client_ip(&headers, &ConnectInfo(addr));
     let req_path = match query.path.as_deref() {
         Some(p) if !p.is_empty() => p,
         _ => return api_error(StatusCode::BAD_REQUEST, "path is required"),
@@ -343,7 +361,7 @@ pub async fn create_directory(
 
     match fs::create_dir_all(&dir_path).await {
         Ok(()) => {
-            state.audit_logger.directory_created(req_path).await;
+            state.audit_logger.directory_created(req_path, &ip).await;
             info!(path = %req_path, "Web UI directory created");
             StatusCode::CREATED.into_response()
         }

@@ -72,31 +72,31 @@ impl WebAuditLogger {
         }
     }
 
-    pub async fn file_uploaded(&self, path: &str, size: u64) {
+    pub async fn file_uploaded(&self, path: &str, size: u64, client_ip: &str) {
         self.append(&WebAuditEvent::WebFileUploaded {
             timestamp: chrono::Utc::now().to_rfc3339(),
             path: path.to_string(),
             size,
-            source: "web".to_string(),
+            source: client_ip.to_string(),
         })
         .await;
     }
 
-    pub async fn file_deleted(&self, path: &str, is_dir: bool) {
+    pub async fn file_deleted(&self, path: &str, is_dir: bool, client_ip: &str) {
         self.append(&WebAuditEvent::WebFileDeleted {
             timestamp: chrono::Utc::now().to_rfc3339(),
             path: path.to_string(),
             is_dir,
-            source: "web".to_string(),
+            source: client_ip.to_string(),
         })
         .await;
     }
 
-    pub async fn directory_created(&self, path: &str) {
+    pub async fn directory_created(&self, path: &str, client_ip: &str) {
         self.append(&WebAuditEvent::WebDirectoryCreated {
             timestamp: chrono::Utc::now().to_rfc3339(),
             path: path.to_string(),
-            source: "web".to_string(),
+            source: client_ip.to_string(),
         })
         .await;
     }
