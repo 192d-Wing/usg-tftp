@@ -17,6 +17,7 @@ fn api_error(status: StatusCode, msg: impl Into<String>) -> Response {
     (status, Json(ApiError { error: msg.into() })).into_response()
 }
 
+#[allow(clippy::result_large_err)]
 fn require_write(state: &AppState) -> Result<(), Response> {
     if !state.config.write_config.enabled {
         return Err(api_error(
