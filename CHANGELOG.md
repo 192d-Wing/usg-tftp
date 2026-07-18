@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.15] - 2026-07-18
+
+### Fixed
+
+- Release workflow: replaced `softprops/action-gh-release` with `gh` CLI to
+  fix failure on GitHub's immutable releases
+
 ## [0.1.14] - 2026-07-18
 
 ### Added
