@@ -6,6 +6,7 @@ mod buffer_pool;
 mod config;
 mod error;
 mod multicast;
+mod path_security;
 mod worker_pool;
 
 use audit::AuditLogger;

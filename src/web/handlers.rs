@@ -226,7 +226,10 @@ pub async fn upload_files(
         }
 
         if dest.exists() && !state.config.write_config.allow_overwrite {
-            errors.push(format!("{}: file exists and overwrite is disabled", relative));
+            errors.push(format!(
+                "{}: file exists and overwrite is disabled",
+                relative
+            ));
             continue;
         }
 
@@ -331,7 +334,11 @@ pub async fn delete_file(
     };
 
     if !state.config.write_config.allowed_patterns.is_empty()
-        && !is_write_allowed(&file_path, &state.config.root_dir, &state.config.write_config)
+        && !is_write_allowed(
+            &file_path,
+            &state.config.root_dir,
+            &state.config.write_config,
+        )
     {
         return api_error(StatusCode::FORBIDDEN, "Path not in allowed write patterns");
     }
