@@ -2,8 +2,8 @@ apiVersion: v2
 name: usg-tftp
 description: A high-performance TFTP server with RFC 2347/2348/2349/7440 support
 type: application
-version: 0.1.11
-appVersion: "0.1.11"
+version: 0.1.12
+appVersion: "0.1.12"
 keywords:
   - tftp
   - networking
