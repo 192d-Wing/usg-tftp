@@ -81,6 +81,7 @@ data:
     bind_addr = "0.0.0.0:443"
     max_upload_bytes = {{ int64 .Values.webUI.maxUploadBytes }}
     cors_enabled = {{ .Values.webUI.corsEnabled }}
+    proxy_protocol = {{ .Values.webUI.proxyProtocol }}
     audit_log_path = "/var/log/usg-tftp/webui-audit.jsonl"
 
     [web.tls]

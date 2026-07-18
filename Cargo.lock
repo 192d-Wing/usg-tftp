@@ -2198,7 +2198,7 @@ checksum = "8ecb6da28b8a351d773b68d5825ac39017e680750f980f3a1a85cd8dd28a47c1"
 
 [[package]]
 name = "usg-tftp"
-version = "0.1.11"
+version = "0.1.13"
 dependencies = [
  "anyhow",
  "axum",
@@ -2210,6 +2210,8 @@ dependencies = [
  "glob",
  "hostname",
  "http",
+ "hyper",
+ "hyper-util",
  "libc",
  "mime_guess",
  "nix",
@@ -2223,6 +2225,7 @@ dependencies = [
  "socket2",
  "thiserror 2.0.18",
  "tokio",
+ "tokio-rustls",
  "tokio-util",
  "toml",
  "tower",

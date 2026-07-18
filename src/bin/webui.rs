@@ -63,8 +63,9 @@ async fn main() -> anyhow::Result<()> {
 
     let app = web::create_router(state);
 
-    info!(addr = %bind_addr, "Starting USG TFTP Web UI");
-    web::tls::serve_https(app, bind_addr, &tls_config).await?;
+    let proxy_protocol = config.web.proxy_protocol;
+    info!(addr = %bind_addr, proxy_protocol, "Starting USG TFTP Web UI");
+    web::tls::serve_https(app, bind_addr, &tls_config, proxy_protocol).await?;
 
     Ok(())
 }

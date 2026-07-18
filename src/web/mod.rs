@@ -1,6 +1,7 @@
 pub mod audit;
 pub mod handlers;
 pub mod models;
+pub mod proxy_protocol;
 pub mod static_files;
 pub mod tls;
 
