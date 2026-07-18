@@ -591,6 +591,11 @@ webUI:
   # -- Enable CORS headers on the API.
   corsEnabled: false
 
+  # -- Enable PROXY protocol v2 header parsing.
+  # Required when using Traefik IngressRouteTCP with TLS passthrough
+  # to preserve the real client IP in audit logs.
+  proxyProtocol: false
+
   # -- CPU and memory resources for the web UI container.
   resources: {}
 

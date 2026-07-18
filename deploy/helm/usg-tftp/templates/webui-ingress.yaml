@@ -16,6 +16,10 @@ spec:
       services:
         - name: {{ include "usg-tftp.fullname" . }}-webui
           port: {{ .Values.webUI.service.port }}
+          {{- if .Values.webUI.proxyProtocol }}
+          proxyProtocol:
+            version: 2
+          {{- end }}
   tls:
     passthrough: true
 {{- else }}

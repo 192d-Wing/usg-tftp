@@ -53,6 +53,7 @@ async fn main() -> anyhow::Result<()> {
 
     let bind_addr = config.web.bind_addr;
     let tls_config = config.web.tls.clone();
+    let proxy_protocol = config.web.proxy_protocol;
     let audit_logger = WebAuditLogger::new(&config.web.audit_log_path);
 
     let state = web::AppState {
@@ -62,9 +63,8 @@ async fn main() -> anyhow::Result<()> {
     };
 
     let app = web::create_router(state);
-
-    info!(addr = %bind_addr, "Starting USG TFTP Web UI");
-    web::tls::serve_https(app, bind_addr, &tls_config).await?;
+    info!(addr = %bind_addr, proxy_protocol, "Starting USG TFTP Web UI");
+    web::tls::serve_https(app, bind_addr, &tls_config, proxy_protocol).await?;
 
     Ok(())
 }

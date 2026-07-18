@@ -68,6 +68,7 @@ pub struct WebConfig {
     pub bind_addr: SocketAddr,
     pub max_upload_bytes: u64,
     pub cors_enabled: bool,
+    pub proxy_protocol: bool,
     pub tls: TlsConfig,
     pub audit_log_path: String,
 }
@@ -78,6 +79,7 @@ impl Default for WebConfig {
             bind_addr: SocketAddr::new(Ipv4Addr::UNSPECIFIED.into(), 443),
             max_upload_bytes: 524_288_000, // 500 MB
             cors_enabled: false,
+            proxy_protocol: false,
             tls: TlsConfig::default(),
             audit_log_path: "/var/log/usg-tftp/webui-audit.jsonl".to_string(),
         }

@@ -61,10 +61,13 @@ mime_guess = { version = "2", optional = true }
 rustls-acme = { version = "0.15", features = ["axum", "tower"], optional = true }
 rustls = { version = "0.23", optional = true }
 rustls-pemfile = { version = "2", optional = true }
+tokio-rustls = { version = "0.26", optional = true }
+hyper = { version = "1", features = ["server"], optional = true }
+hyper-util = { version = "0.1", features = ["tokio", "server-auto", "http1", "http2"], optional = true }
 futures-lite = { version = "2", optional = true }
-tower = { version = "0.5", optional = true }
+tower = { version = "0.5", features = ["util"], optional = true }
 http = { version = "1", optional = true }
 
 [features]
 default = []
-webui = ["axum", "axum-server", "tower-http", "rust-embed", "mime_guess", "rustls-acme", "rustls", "rustls-pemfile", "futures-lite", "tower", "http"]
+webui = ["axum", "axum-server", "tower-http", "rust-embed", "mime_guess", "rustls-acme", "rustls", "rustls-pemfile", "tokio-rustls", "hyper", "hyper-util", "futures-lite", "tower", "http"]
