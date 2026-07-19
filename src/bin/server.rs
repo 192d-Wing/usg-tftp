@@ -1,7 +1,7 @@
 // USG-TFTP TFTP Server Binary
 #![allow(dead_code)]
 
-use usg_tftp::audit::AuditLogger;
+use usg_tftp::audit::{AuditLogger, init_audit_file};
 use usg_tftp::buffer_pool::BufferPool;
 use usg_tftp::config::{
     self, LogFormat, MulticastConfig, MulticastIpVersion, SocketConfig, TftpConfig, WriteConfig,
@@ -2690,6 +2690,16 @@ async fn main() -> Result<()> {
 
         None
     };
+
+    // Initialize file-based audit log (shared with web UI via data PVC)
+    if config.logging.audit_enabled {
+        let audit_path = config
+            .logging
+            .audit_file
+            .clone()
+            .unwrap_or_else(|| config.root_dir.join(".audit/tftp-audit.jsonl"));
+        init_audit_file(audit_path);
+    }
 
     // Audit log: Server startup
     if config.logging.audit_enabled {

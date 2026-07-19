@@ -108,6 +108,12 @@ service:
   # Set to 69 only if your cluster allows privileged node ports.
   nodePort: null
 
+  # -- Extra labels on the Service (e.g. for BGP advertisement selectors).
+  # Example:
+  #   labels:
+  #     network: k3s-pod-cidrs
+  labels: {}
+
   # -- Extra annotations on the Service (e.g. MetalLB address pool,
   # cloud LB internal flag, health-check config).
   annotations: {}
@@ -680,6 +686,10 @@ cilium:
 
     # -- BGP advertisements. Each entry creates a CiliumBGPAdvertisement
     # that controls which IPs are announced over BGP.
+    # The `labels` map is applied to the CiliumBGPAdvertisement metadata.
+    # Peer configs select advertisements by label — e.g. if peers select
+    # `advertise: k3s-pod-cidrs`, set that label here.
+    # The `selector` field filters which Services are advertised.
     # Example:
     #   advertisements:
     #     - name: tftp-lb
@@ -692,5 +702,5 @@ cilium:
     #         matchLabels:
     #           network: k3s-pod-cidrs
     #       labels:
-    #         network: k3s-pod-cidrs
+    #         advertise: k3s-pod-cidrs
     advertisements: []

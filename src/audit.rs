@@ -1,7 +1,29 @@
 use serde::{Deserialize, Serialize};
+use std::fs::OpenOptions;
+use std::io::Write;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
 use tracing::{Level, event};
+
+static AUDIT_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+/// Initialize the file-based audit log path.
+/// Events will be appended as raw JSONL to this file in addition to tracing output.
+pub fn init_audit_file(path: PathBuf) {
+    if let Some(parent) = path.parent() {
+        let _ = std::fs::create_dir_all(parent);
+    }
+    let _ = AUDIT_FILE_PATH.set(path);
+}
+
+fn append_to_audit_file(json: &str) {
+    if let Some(path) = AUDIT_FILE_PATH.get() {
+        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
+            let _ = writeln!(file, "{}", json);
+        }
+    }
+}
 
 /// Security audit event types for SIEM integration
 ///
@@ -341,6 +363,8 @@ impl AuditEvent {
                 self
             )
         });
+
+        append_to_audit_file(&json);
 
         match severity.as_str() {
             "error" => event!(Level::ERROR, audit_event = %json),

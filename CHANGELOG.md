@@ -2,6 +2,26 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.17] - 2026-07-18
+
+### Fixed
+
+- TFTP audit events now visible in web UI: added file-based JSONL audit logger
+  that writes to the shared data PVC (`{root_dir}/.audit/tftp-audit.jsonl`)
+  instead of relying on the tracing log file (which was on a separate emptyDir)
+- Web UI audit log also moved to shared data PVC for persistence across restarts
+
+### Added
+
+- `logging.audit_file` config option for explicit audit JSONL path
+- `service.labels` Helm value for adding labels to the TFTP Service
+  (needed for BGP advertisement selectors like `network: k3s-pod-cidrs`)
+
+### Security
+
+- Path validation now rejects hidden paths (segments starting with `.`)
+  to protect the `.audit/` directory from TFTP client access
+
 ## [0.1.16] - 2026-07-18
 
 ### Fixed

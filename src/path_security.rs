@@ -27,7 +27,10 @@ pub fn is_write_allowed(file_path: &Path, root_dir: &Path, write_config: &WriteC
 
 pub fn validate_and_resolve_path(root_dir: &Path, filename: &str) -> Result<PathBuf> {
     let filename = filename.replace('\\', "/");
-    if filename.split('/').any(|seg| seg == "..") {
+    if filename
+        .split('/')
+        .any(|seg| seg == ".." || seg.starts_with('.'))
+    {
         return Err(TftpError::Tftp("Invalid filename".to_string()));
     }
 

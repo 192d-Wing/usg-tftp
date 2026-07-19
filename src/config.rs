@@ -122,6 +122,9 @@ pub struct LoggingConfig {
     pub level: String,
     pub format: LogFormat,
     pub file: Option<PathBuf>,
+    /// Path for raw JSONL audit events (shared with web UI).
+    /// Defaults to `{root_dir}/.audit/tftp-audit.jsonl`.
+    pub audit_file: Option<PathBuf>,
     /// Enable structured audit logging for SIEM integration
     /// When enabled, all security-relevant events are logged as structured JSON
     pub audit_enabled: bool,
@@ -133,6 +136,7 @@ impl Default for LoggingConfig {
             level: "info".to_string(),
             format: LogFormat::Json,
             file: Some(PathBuf::from("/var/log/usg-tftp/tftp-audit.json")),
+            audit_file: None,
             audit_enabled: true,
         }
     }

@@ -2742,7 +2742,10 @@ impl TftpServer {
         // NIST SI-10: Normalize the filename and check for directory traversal
         // STIG V-222603: Prevent path traversal attacks (.., ./, etc.)
         let filename = filename.replace('\\', "/");
-        if filename.split('/').any(|seg| seg == "..") {
+        if filename
+            .split('/')
+            .any(|seg| seg == ".." || seg.starts_with('.'))
+        {
             return Err(TftpError::Tftp("Invalid filename".to_string()));
         }
 
