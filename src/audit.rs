@@ -1,10 +1,21 @@
 use serde::{Deserialize, Serialize};
 use std::fs::OpenOptions;
 use std::io::Write;
-use std::net::SocketAddr;
+use std::net::{IpAddr, SocketAddr};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use tracing::{Level, event};
+
+/// Format a SocketAddr, converting IPv4-mapped IPv6 (::ffff:x.x.x.x) to plain IPv4.
+fn fmt_addr(addr: SocketAddr) -> String {
+    match addr.ip() {
+        IpAddr::V6(v6) => match v6.to_ipv4_mapped() {
+            Some(v4) => SocketAddr::new(IpAddr::V4(v4), addr.port()).to_string(),
+            None => addr.to_string(),
+        },
+        _ => addr.to_string(),
+    }
+}
 
 static AUDIT_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
 
@@ -445,7 +456,7 @@ impl AuditLogger {
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap_or_default()
                 .as_millis(),
-            client_addr.to_string().replace(':', "-"),
+            fmt_addr(client_addr).replace(':', "-"),
             hash
         )
     }
@@ -460,7 +471,7 @@ impl AuditLogger {
     ) {
         AuditEvent::ReadRequest {
             common: CommonFields::with_correlation("info", correlation_id.to_string()),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             filename: filename.to_string(),
             mode: mode.to_string(),
             options,
@@ -477,7 +488,7 @@ impl AuditLogger {
     ) {
         AuditEvent::ReadRequest {
             common: CommonFields::new("info"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             filename: filename.to_string(),
             mode: mode.to_string(),
             options,
@@ -489,7 +500,7 @@ impl AuditLogger {
     pub fn read_denied(client_addr: SocketAddr, filename: &str, reason: &str) {
         AuditEvent::ReadDenied {
             common: CommonFields::new("warn"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             filename: filename.to_string(),
             reason: reason.to_string(),
         }
@@ -507,7 +518,7 @@ impl AuditLogger {
     ) {
         AuditEvent::TransferStarted {
             common: CommonFields::with_correlation("info", correlation_id.to_string()),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             filename: filename.to_string(),
             file_size,
             mode: mode.to_string(),
@@ -526,7 +537,7 @@ impl AuditLogger {
     ) {
         AuditEvent::TransferStarted {
             common: CommonFields::new("info"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             filename: filename.to_string(),
             file_size,
             mode: mode.to_string(),
@@ -556,7 +567,7 @@ impl AuditLogger {
 
         AuditEvent::TransferCompleted {
             common: CommonFields::with_correlation("info", correlation_id.to_string()),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             filename: filename.to_string(),
             bytes_transferred,
             blocks_sent,
@@ -587,7 +598,7 @@ impl AuditLogger {
 
         AuditEvent::TransferCompleted {
             common: CommonFields::new("info"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             filename: filename.to_string(),
             bytes_transferred,
             blocks_sent,
@@ -602,7 +613,7 @@ impl AuditLogger {
     pub fn transfer_failed(client_addr: SocketAddr, filename: &str, error: &str, blocks_sent: u16) {
         AuditEvent::TransferFailed {
             common: CommonFields::new("error"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             filename: filename.to_string(),
             error: error.to_string(),
             blocks_sent,
@@ -620,7 +631,7 @@ impl AuditLogger {
     ) {
         AuditEvent::WriteRequest {
             common: CommonFields::new("info"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             filename: filename.to_string(),
             mode: mode.to_string(),
             options,
@@ -632,7 +643,7 @@ impl AuditLogger {
     pub fn write_request_denied(client_addr: SocketAddr, filename: &str, reason: &str) {
         AuditEvent::WriteRequestDenied {
             common: CommonFields::new("warn"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             filename: filename.to_string(),
             reason: reason.to_string(),
         }
@@ -643,7 +654,7 @@ impl AuditLogger {
     pub fn write_started(client_addr: SocketAddr, filename: &str, mode: &str, block_size: usize) {
         AuditEvent::WriteStarted {
             common: CommonFields::new("info"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             filename: filename.to_string(),
             mode: mode.to_string(),
             block_size,
@@ -672,7 +683,7 @@ impl AuditLogger {
 
         AuditEvent::WriteCompleted {
             common: CommonFields::new("info"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             filename: filename.to_string(),
             bytes_received,
             blocks_received,
@@ -693,7 +704,7 @@ impl AuditLogger {
     ) {
         AuditEvent::WriteFailed {
             common: CommonFields::new("error"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             filename: filename.to_string(),
             error: error.to_string(),
             blocks_received,
@@ -709,7 +720,7 @@ impl AuditLogger {
     ) {
         AuditEvent::PathTraversalAttempt {
             common: CommonFields::new("error"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             requested_path: requested_path.to_string(),
             violation_type: violation_type.to_string(),
         }
@@ -720,7 +731,7 @@ impl AuditLogger {
     pub fn access_violation(client_addr: SocketAddr, resource: &str, violation: &str) {
         AuditEvent::AccessViolation {
             common: CommonFields::new("error"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             resource: resource.to_string(),
             violation: violation.to_string(),
         }
@@ -736,7 +747,7 @@ impl AuditLogger {
     ) {
         AuditEvent::FileSizeLimitExceeded {
             common: CommonFields::new("error"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             filename: filename.to_string(),
             file_size,
             max_allowed,
@@ -748,7 +759,7 @@ impl AuditLogger {
     pub fn protocol_violation(client_addr: SocketAddr, violation: &str) {
         AuditEvent::ProtocolViolation {
             common: CommonFields::new("error"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             violation: violation.to_string(),
         }
         .log();
@@ -781,7 +792,7 @@ impl AuditLogger {
         AuditEvent::MulticastClientJoined {
             common: CommonFields::new("info"),
             session_id: session_id.to_string(),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             is_master,
             total_clients,
         }
@@ -798,7 +809,7 @@ impl AuditLogger {
         AuditEvent::MulticastClientRemoved {
             common: CommonFields::new("warn"),
             session_id: session_id.to_string(),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             reason: reason.to_string(),
             remaining_clients,
         }
@@ -809,7 +820,7 @@ impl AuditLogger {
     pub fn symlink_access_denied(client_addr: SocketAddr, requested_path: &str) {
         AuditEvent::SymlinkAccessDenied {
             common: CommonFields::new("error"),
-            client_addr: client_addr.to_string(),
+            client_addr: fmt_addr(client_addr),
             requested_path: requested_path.to_string(),
         }
         .log();
