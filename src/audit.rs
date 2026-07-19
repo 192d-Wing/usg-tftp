@@ -18,6 +18,7 @@ fn fmt_addr(addr: SocketAddr) -> String {
 }
 
 static AUDIT_FILE_PATH: OnceLock<PathBuf> = OnceLock::new();
+static AUDIT_ROOT_DIR: OnceLock<PathBuf> = OnceLock::new();
 
 /// Initialize the file-based audit log path.
 /// Events will be appended as raw JSONL to this file in addition to tracing output.
@@ -26,6 +27,23 @@ pub fn init_audit_file(path: PathBuf) {
         let _ = std::fs::create_dir_all(parent);
     }
     let _ = AUDIT_FILE_PATH.set(path);
+}
+
+/// Store the root directory so audit events can log relative paths.
+pub fn init_audit_root_dir(root_dir: PathBuf) {
+    let _ = AUDIT_ROOT_DIR.set(root_dir);
+}
+
+/// Strip root_dir prefix from a path, returning the relative portion.
+fn relative_path(path: &str) -> &str {
+    if let Some(root) = AUDIT_ROOT_DIR.get() {
+        let root_str = root.to_str().unwrap_or("");
+        path.strip_prefix(root_str)
+            .unwrap_or(path)
+            .trim_start_matches('/')
+    } else {
+        path
+    }
 }
 
 fn append_to_audit_file(json: &str) {
@@ -519,7 +537,7 @@ impl AuditLogger {
         AuditEvent::TransferStarted {
             common: CommonFields::with_correlation("info", correlation_id.to_string()),
             client_addr: fmt_addr(client_addr),
-            filename: filename.to_string(),
+            filename: relative_path(filename).to_string(),
             file_size,
             mode: mode.to_string(),
             block_size,
@@ -538,7 +556,7 @@ impl AuditLogger {
         AuditEvent::TransferStarted {
             common: CommonFields::new("info"),
             client_addr: fmt_addr(client_addr),
-            filename: filename.to_string(),
+            filename: relative_path(filename).to_string(),
             file_size,
             mode: mode.to_string(),
             block_size,
@@ -568,7 +586,7 @@ impl AuditLogger {
         AuditEvent::TransferCompleted {
             common: CommonFields::with_correlation("info", correlation_id.to_string()),
             client_addr: fmt_addr(client_addr),
-            filename: filename.to_string(),
+            filename: relative_path(filename).to_string(),
             bytes_transferred,
             blocks_sent,
             duration_ms,
@@ -599,7 +617,7 @@ impl AuditLogger {
         AuditEvent::TransferCompleted {
             common: CommonFields::new("info"),
             client_addr: fmt_addr(client_addr),
-            filename: filename.to_string(),
+            filename: relative_path(filename).to_string(),
             bytes_transferred,
             blocks_sent,
             duration_ms,
@@ -655,7 +673,7 @@ impl AuditLogger {
         AuditEvent::WriteStarted {
             common: CommonFields::new("info"),
             client_addr: fmt_addr(client_addr),
-            filename: filename.to_string(),
+            filename: relative_path(filename).to_string(),
             mode: mode.to_string(),
             block_size,
         }
@@ -684,7 +702,7 @@ impl AuditLogger {
         AuditEvent::WriteCompleted {
             common: CommonFields::new("info"),
             client_addr: fmt_addr(client_addr),
-            filename: filename.to_string(),
+            filename: relative_path(filename).to_string(),
             bytes_received,
             blocks_received,
             duration_ms,
@@ -705,7 +723,7 @@ impl AuditLogger {
         AuditEvent::WriteFailed {
             common: CommonFields::new("error"),
             client_addr: fmt_addr(client_addr),
-            filename: filename.to_string(),
+            filename: relative_path(filename).to_string(),
             error: error.to_string(),
             blocks_received,
         }
