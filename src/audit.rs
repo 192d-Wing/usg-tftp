@@ -18,10 +18,10 @@ pub fn init_audit_file(path: PathBuf) {
 }
 
 fn append_to_audit_file(json: &str) {
-    if let Some(path) = AUDIT_FILE_PATH.get() {
-        if let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path) {
-            let _ = writeln!(file, "{}", json);
-        }
+    if let Some(path) = AUDIT_FILE_PATH.get()
+        && let Ok(mut file) = OpenOptions::new().create(true).append(true).open(path)
+    {
+        let _ = writeln!(file, "{}", json);
     }
 }
 
