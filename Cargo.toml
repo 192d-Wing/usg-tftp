@@ -1,6 +1,6 @@
 [package]
 name = "usg-tftp"
-version = "0.1.17"
+version = "0.1.18"
 edition = "2024"
 authors = ["USG TFTP Contributors"]
 license = "MIT OR Apache-2.0"

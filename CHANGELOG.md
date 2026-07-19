@@ -2,6 +2,15 @@
 
 All notable changes to this project will be documented in this file.
 
+## [0.1.18] - 2026-07-19
+
+### Fixed
+
+- Audit log now shows plain IPv4 addresses instead of IPv4-mapped IPv6
+  (`10.1.0.100:33721` instead of `[::ffff:10.1.0.100]:33721`)
+- Audit log now shows relative file paths instead of absolute filesystem paths
+  (`poly-8-6/site.cfg` instead of `/var/lib/usg-tftp/tftp/poly-8-6/site.cfg`)
+
 ## [0.1.17] - 2026-07-18
 
 ### Fixed
